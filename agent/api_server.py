@@ -3066,6 +3066,15 @@ register_alpha_routes(app)
 
 
 # ============================================================================
+# Market overview routes (Web UI) — defined in src/api/market_routes.py
+# Read-only public quote proxy; no auth (parity with /health, /skills).
+# ============================================================================
+
+from src.api.market_routes import router as market_router  # noqa: E402
+app.include_router(market_router)
+
+
+# ============================================================================
 # Main Entry Point
 # ============================================================================
 
