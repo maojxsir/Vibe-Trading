@@ -103,6 +103,18 @@ export interface MarketNewsWire {
   source: string;
   stale: boolean;
 }
+export interface LogicChainNodeWire {
+  id: string;
+  kind: "trigger" | "transmit" | "sector" | "target";
+  label: string;
+  desc: string;
+  code?: string;
+}
+export interface LogicChainGenWire {
+  nodes: LogicChainNodeWire[];
+  edges: { source: string; target: string }[];
+  error: string | null;
+}
 
 export const api = {
   uploadFile,
@@ -110,6 +122,11 @@ export const api = {
   getQuotes: (codes: string[]) =>
     request<MarketQuotesWire>(`/market/quotes?codes=${encodeURIComponent(codes.join(","))}`),
   getNews: () => request<MarketNewsWire>("/market/news"),
+  generateLogicChain: (topic: string) =>
+    request<LogicChainGenWire>("/market/logic-chain/generate", {
+      method: "POST",
+      body: JSON.stringify({ topic }),
+    }),
   listRuns: () => request<RunListItem[]>("/runs"),
   getRun: (id: string) => request<RunData>(`/runs/${id}`),
   getRunCode: (id: string) => request<Record<string, string>>(`/runs/${id}/code`),

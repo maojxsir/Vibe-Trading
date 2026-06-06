@@ -9,6 +9,8 @@ export interface ChainNodeData extends Record<string, unknown> {
   label: string;
   desc: string;
   kind: ChainKind;
+  code?: string; // A-share code for target nodes
+  changePct?: number; // live change %, injected for target nodes
 }
 
 export type ChainNode = Node<ChainNodeData, "chainNode">;
