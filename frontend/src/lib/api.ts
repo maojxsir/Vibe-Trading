@@ -83,10 +83,33 @@ export interface MarketOverviewWire {
   source: string;
   stale: boolean;
 }
+export interface MarketQuotesWire {
+  quotes: Record<string, MarketQuoteWire>;
+  updatedAt: string;
+  source: string;
+  stale: boolean;
+}
+export interface NewsItemWire {
+  source: string;
+  time: string;
+  title: string;
+  summary: string;
+  url: string;
+  tickers: string[];
+}
+export interface MarketNewsWire {
+  items: NewsItemWire[];
+  updatedAt: string;
+  source: string;
+  stale: boolean;
+}
 
 export const api = {
   uploadFile,
   getMarketOverview: () => request<MarketOverviewWire>("/market/overview"),
+  getQuotes: (codes: string[]) =>
+    request<MarketQuotesWire>(`/market/quotes?codes=${encodeURIComponent(codes.join(","))}`),
+  getNews: () => request<MarketNewsWire>("/market/news"),
   listRuns: () => request<RunListItem[]>("/runs"),
   getRun: (id: string) => request<RunData>(`/runs/${id}`),
   getRunCode: (id: string) => request<Record<string, string>>(`/runs/${id}/code`),

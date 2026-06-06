@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { changeColorClass, fmtPct, fmtPrice, fmtMarketCap } from "@/lib/cn-market";
+import { changeColorClass, fmtPct, fmtPrice, fmtMarketCap, toTencentCode } from "@/lib/cn-market";
 
 describe("cn-market", () => {
   it("红涨绿跌: >=0 红, <0 绿", () => {
@@ -22,5 +22,13 @@ describe("cn-market", () => {
   it("市值: 万亿换算", () => {
     expect(fmtMarketCap(577)).toBe("577");
     expect(fmtMarketCap(14148)).toBe("1.41万亿");
+  });
+
+  it("代码归一化为腾讯前缀", () => {
+    expect(toTencentCode("688017")).toBe("sh688017");
+    expect(toTencentCode("601689")).toBe("sh601689");
+    expect(toTencentCode("300308")).toBe("sz300308");
+    expect(toTencentCode("002472")).toBe("sz002472");
+    expect(toTencentCode("sh688017")).toBe("sh688017");
   });
 });
