@@ -1,5 +1,6 @@
 from src.api.market_quotes import parse_tencent_line, parse_tencent_payload
 from src.api.market_news import parse_sina_news, tag_tickers
+from src.api.logic_chain import extract_chain_json
 
 
 def test_parse_tencent_index_line():
@@ -65,3 +66,42 @@ def test_parse_sina_news_empty_payload():
 
 def test_tag_tickers_no_match():
     assert tag_tickers("今日天气晴朗") == []
+
+
+def test_extract_chain_json_fenced():
+    text = (
+        "好的，结果如下：\n"
+        "```json\n"
+        '{"nodes":[{"id":"t1","kind":"trigger","label":"H200解禁","desc":"出口放开"},'
+        '{"id":"s1","kind":"sector","label":"光模块","desc":"国产化"},'
+        '{"id":"g1","kind":"target","label":"中际旭创","desc":"龙头","code":"300308"}],'
+        '"edges":[{"source":"t1","target":"s1"},{"source":"s1","target":"g1"}]}\n'
+        "```\n"
+    )
+    chain = extract_chain_json(text)
+    assert len(chain["nodes"]) == 3
+    assert len(chain["edges"]) == 2
+    target = [n for n in chain["nodes"] if n["kind"] == "target"][0]
+    assert target["code"] == "300308"
+
+
+def test_extract_chain_json_drops_bad_nodes_and_edges():
+    text = (
+        '{"nodes":[{"id":"a","kind":"trigger","label":"X"},'
+        '{"id":"b","kind":"BOGUS","label":"Y"},'
+        '{"id":"c","kind":"sector","label":""}],'
+        '"edges":[{"source":"a","target":"b"},{"source":"a","target":"a"}]}'
+    )
+    chain = extract_chain_json(text)
+    # only node "a" is valid; edges referencing dropped/ self are removed
+    assert [n["id"] for n in chain["nodes"]] == ["a"]
+    assert chain["edges"] == []
+
+
+def test_extract_chain_json_raises_on_empty():
+    import pytest
+
+    with pytest.raises(ValueError):
+        extract_chain_json("")
+    with pytest.raises(ValueError):
+        extract_chain_json("no json here")
