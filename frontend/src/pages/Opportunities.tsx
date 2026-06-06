@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { Pencil, Plus, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
+import { Pencil, Plus, RefreshCw, RotateCcw, Trash2, Bot, Loader2 } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { Card } from "@/components/dashboard/Card";
 import { Badge } from "@/components/dashboard/Badge";
@@ -7,6 +9,7 @@ import { opportunitiesSeed, type Opportunity, type OppStatus } from "@/data/oppo
 import { useLiveQuotes } from "@/hooks/useLiveQuotes";
 import { loadPersisted, savePersisted, clearPersisted } from "@/lib/persist";
 import { changeColorClass, fmtPct, fmtPrice } from "@/lib/cn-market";
+import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const STORE = "opportunities";
@@ -18,14 +21,41 @@ const STATUS_TONE: Record<OppStatus, "info" | "warning" | "success"> = {
 };
 
 export function Opportunities() {
+  const navigate = useNavigate();
   const [rows, setRows] = useState<Opportunity[]>(() => loadPersisted(STORE, opportunitiesSeed));
   const [editing, setEditing] = useState(false);
   const [filter, setFilter] = useState("全部");
+  const [researchingCode, setResearchingCode] = useState<string | null>(null);
 
   useEffect(() => savePersisted(STORE, rows), [rows]);
 
   const codes = useMemo(() => rows.map((r) => r.code), [rows]);
   const { quotes, stale, updatedAt, loading, refresh } = useLiveQuotes(codes);
+
+  // Hand one candidate to the Vibe-Trading agent for a web-grounded research
+  // brief, then open the Agent chat to watch it reason and call tools.
+  const researchOne = async (o: Opportunity) => {
+    setResearchingCode(o.code);
+    try {
+      const price = quotes[o.code]?.price ?? null;
+      const upside = price && price > 0 ? ((o.target - price) / price) * 100 : null;
+      const prompt =
+        `请联网研究以下 A 股候选标的，给出研究纪要与买入论证。\n\n` +
+        `标的：${o.name}(${o.code})\n板块：${o.sector}\n触发逻辑：${o.trigger}\n` +
+        `现价：${price == null ? "未知" : fmtPrice(price)}　目标价：${fmtPrice(o.target)}` +
+        `${upside == null ? "" : `（距目标 ${fmtPct(upside)}）`}　我的评分：${o.score}\n\n` +
+        `要求：\n1. 用 web_search 检索最新基本面、产业进展、催化与风险；\n` +
+        `2. 评估「触发逻辑」是否成立、目标价是否合理；\n` +
+        `3. 给出买入论证、关键风险、合理买点/区间与需跟踪的指标；\n` +
+        `4. 用中文，结构化输出（要点或表格）。`;
+      const session = await api.createSession(`研究·${o.name}`);
+      await api.sendMessage(session.session_id, prompt);
+      navigate(`/agent?session=${session.session_id}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "无法启动 Agent 研究（需后端运行）");
+      setResearchingCode(null);
+    }
+  };
 
   const sectors = useMemo(
     () => ["全部", ...Array.from(new Set(rows.map((o) => o.sector.split("·")[0])))],
@@ -81,7 +111,7 @@ export function Opportunities() {
                 <th className="px-3 py-2 text-right font-medium">距目标</th>
                 <th className="px-3 py-2 text-right font-medium">评分</th>
                 <th className="px-3 py-2 text-left font-medium">状态</th>
-                {editing && <th className="px-3 py-2" />}
+                <th className="px-3 py-2 text-right font-medium">{editing ? "" : "操作"}</th>
               </tr>
             </thead>
             <tbody>
@@ -124,9 +154,21 @@ export function Opportunities() {
                         </select>
                       ) : <Badge tone={STATUS_TONE[o.status]}>{o.status}</Badge>}
                     </td>
-                    {editing && (
-                      <td className="px-3 py-2.5 text-right"><button onClick={() => removeRow(o)} className="text-muted-foreground hover:text-danger"><Trash2 className="h-4 w-4" /></button></td>
-                    )}
+                    <td className="px-3 py-2.5 text-right">
+                      {editing ? (
+                        <button onClick={() => removeRow(o)} className="text-muted-foreground hover:text-danger"><Trash2 className="h-4 w-4" /></button>
+                      ) : (
+                        <button
+                          onClick={() => researchOne(o)}
+                          disabled={researchingCode !== null}
+                          className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-1 text-xs font-medium text-primary hover:bg-primary/20 disabled:opacity-50"
+                          title="让 Agent 联网研究该标的"
+                        >
+                          {researchingCode === o.code ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Bot className="h-3.5 w-3.5" />}
+                          研究
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
