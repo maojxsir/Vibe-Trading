@@ -1,4 +1,5 @@
 from src.api.market_quotes import parse_tencent_line, parse_tencent_payload
+from src.api.market_news import parse_sina_news, tag_tickers
 
 
 def test_parse_tencent_index_line():
@@ -32,3 +33,35 @@ def test_parse_tencent_payload_multiline():
     quotes = parse_tencent_payload(text)
     assert set(quotes.keys()) == {"sh000001", "sz399001"}
     assert quotes["sz399001"]["price"] == 15704.71
+
+
+def test_parse_sina_news_normalizes_rows():
+    payload = {
+        "result": {
+            "data": [
+                {
+                    "title": "中际旭创光模块需求旺盛",
+                    "intro": "1.6T 放量",
+                    "media_name": "财联社",
+                    "ctime": "1780000000",
+                    "url": "https://example.com/a",
+                },
+                {"title": "", "intro": "should be skipped"},
+            ]
+        }
+    }
+    rows = parse_sina_news(payload)
+    assert len(rows) == 1
+    assert rows[0]["title"] == "中际旭创光模块需求旺盛"
+    assert rows[0]["source"] == "财联社"
+    assert "中际旭创" in rows[0]["tickers"]
+    assert "光模块" in rows[0]["tickers"]
+
+
+def test_parse_sina_news_empty_payload():
+    assert parse_sina_news({}) == []
+    assert parse_sina_news({"result": {"data": []}}) == []
+
+
+def test_tag_tickers_no_match():
+    assert tag_tickers("今日天气晴朗") == []
