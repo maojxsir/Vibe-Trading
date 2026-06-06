@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { Pencil, Plus, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
+import { Pencil, Plus, RefreshCw, RotateCcw, Trash2, Bot, Loader2 } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { Card } from "@/components/dashboard/Card";
 import { Badge } from "@/components/dashboard/Badge";
@@ -7,6 +9,7 @@ import { holdingsSeed, type DecisionAction, type Holding } from "@/data/holdings
 import { useLiveQuotes } from "@/hooks/useLiveQuotes";
 import { loadPersisted, savePersisted, clearPersisted } from "@/lib/persist";
 import { changeColorClass, fmtPct, fmtPrice } from "@/lib/cn-market";
+import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const STORE = "holdings";
@@ -19,8 +22,10 @@ const ACTION_TONE: Record<DecisionAction, "danger" | "success" | "neutral" | "wa
 };
 
 export function Holdings() {
+  const navigate = useNavigate();
   const [rows, setRows] = useState<Holding[]>(() => loadPersisted(STORE, holdingsSeed));
   const [editing, setEditing] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
 
   useEffect(() => savePersisted(STORE, rows), [rows]);
 
@@ -28,6 +33,34 @@ export function Holdings() {
   const { quotes, stale, updatedAt, loading, refresh } = useLiveQuotes(codes);
 
   const priceOf = (h: Holding) => quotes[h.code]?.price ?? h.price;
+
+  // Hand the live holdings to the Vibe-Trading agent for a review, then open the
+  // Agent chat (with SSE replay) to watch it reason and call tools.
+  const reviewWithAgent = async () => {
+    setReviewing(true);
+    try {
+      const lines = rows
+        .map((h, i) => {
+          const price = priceOf(h);
+          const pnl = h.cost ? ((price - h.cost) / h.cost) * 100 : 0;
+          return `${i + 1}. ${h.name}(${h.code}) 成本${fmtPrice(h.cost)} 现价${fmtPrice(price)} 盈亏${fmtPct(pnl)} 仓位${h.position}% 当前决策:${h.action} 理由:${h.reason || "—"}`;
+        })
+        .join("\n");
+      const prompt =
+        `请帮我复盘以下 A 股持仓组合，并给出加/减/持建议。\n\n持仓明细：\n${lines}\n\n` +
+        `要求：\n1. 逐一评估每只标的的盈亏、估值水平与投资逻辑是否仍然成立；\n` +
+        `2. 指出主要风险点与组合集中度问题；\n` +
+        `3. 如有需要可调用回测、行情或检索工具佐证；\n` +
+        `4. 最后给出每只标的明确的加/减/持建议，以及组合层面的调整建议。\n` +
+        `请用中文，分标的、用要点或表格输出。`;
+      const session = await api.createSession("持仓复盘");
+      await api.sendMessage(session.session_id, prompt);
+      navigate(`/agent?session=${session.session_id}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "无法启动 Agent 复盘（需后端运行）");
+      setReviewing(false);
+    }
+  };
   const update = (i: number, patch: Partial<Holding>) =>
     setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
   const addRow = () =>
@@ -50,6 +83,10 @@ export function Holdings() {
             </button>
             <button onClick={() => setEditing((e) => !e)} className={cn("inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm", editing ? "border-primary bg-primary/10 text-primary" : "bg-card text-muted-foreground hover:text-foreground")}>
               <Pencil className="h-4 w-4" /> {editing ? "完成" : "编辑"}
+            </button>
+            <button onClick={reviewWithAgent} disabled={reviewing} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-60">
+              {reviewing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />}
+              {reviewing ? "启动中…" : "用 Agent 复盘"}
             </button>
           </div>
         }
