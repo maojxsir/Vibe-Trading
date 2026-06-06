@@ -17,35 +17,43 @@ import {
   type Edge,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Plus, Trash2, Sparkles, Loader2 } from "lucide-react";
+import { Plus, Trash2, Sparkles, Loader2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { changeColorClass, fmtPct } from "@/lib/cn-market";
-import { api, type LogicChainNodeWire } from "@/lib/api";
+import { api, ApiError, type LogicChainNodeWire } from "@/lib/api";
+import { clearPersisted, loadPersisted, savePersisted } from "@/lib/persist";
 import {
   CHAIN_PRESETS,
   DEFAULT_CHAIN,
-  defaultNodes,
-  defaultEdges,
   KIND_LABEL,
   KIND_CLASS,
   KIND_DOT,
+  loadChainGraph,
   type ChainKind,
   type ChainNode as ChainNodeT,
 } from "@/data/logicChainSeed";
 
 const STORAGE_PREFIX = "vt-logic-chain:";
+const PRESETS_STORAGE_KEY = "logic-chain:presets:v2";
 const KINDS: ChainKind[] = ["trigger", "transmit", "sector", "target"];
 const COLUMN_X: Record<ChainKind, number> = { trigger: 0, transmit: 340, sector: 680, target: 1020 };
 
-function loadChain(chain: string): { nodes: ChainNodeT[]; edges: Edge[] } {
-  try {
-    const raw = localStorage.getItem(STORAGE_PREFIX + chain);
-    if (raw) return JSON.parse(raw);
-  } catch {
-    /* ignore corrupt cache */
+function formatAgentError(error: unknown, action: string): string {
+  if (error instanceof ApiError) {
+    if (error.status === 405 || /method not allowed/i.test(error.message)) {
+      return `${action}失败：后端接口未加载（HTTP 405）。请重启 vibe-trading serve 后再试。`;
+    }
+    if (error.status === 404) {
+      return `${action}失败：接口不存在（HTTP 404）。请重启后端到最新代码。`;
+    }
+    return `${action}失败：${error.message}`;
   }
-  if (chain === DEFAULT_CHAIN) return { nodes: defaultNodes, edges: defaultEdges };
-  return { nodes: [], edges: [] };
+  const detail = error instanceof Error ? error.message : "未知错误";
+  return `${action}失败：${detail}（需后端运行且已配置 LLM key）`;
+}
+
+function loadChain(chain: string): { nodes: ChainNodeT[]; edges: Edge[] } {
+  return loadChainGraph(chain);
 }
 
 // Convert an agent-generated chain into laid-out React Flow nodes/edges,
@@ -232,15 +240,79 @@ function Flow({ chain }: { chain: string }) {
 
 export function LogicChain() {
   const [chain, setChain] = useState(DEFAULT_CHAIN);
-  const [presets, setPresets] = useState(CHAIN_PRESETS);
+  const [topicInput, setTopicInput] = useState(DEFAULT_CHAIN);
+  const [presets, setPresets] = useState<string[]>(() => loadPersisted(PRESETS_STORAGE_KEY, CHAIN_PRESETS));
   const [genVersion, setGenVersion] = useState(0);
   const [generating, setGenerating] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestedTopics, setSuggestedTopics] = useState<string[]>([]);
   const [genError, setGenError] = useState<string | null>(null);
+  const [suggestError, setSuggestError] = useState<string | null>(null);
+
+  const updatePresets = useCallback((updater: (prev: string[]) => string[]) => {
+    setPresets((prev) => {
+      const next = updater(prev);
+      savePersisted(PRESETS_STORAGE_KEY, next);
+      return next;
+    });
+  }, []);
+
+  const selectTopic = (name: string) => {
+    setChain(name);
+    setTopicInput(name);
+    setGenVersion((v) => v + 1);
+  };
+
+  const ensurePreset = (name: string) => {
+    updatePresets((p) => (p.includes(name) ? p : [...p, name]));
+  };
+
+  const deletePreset = (name: string) => {
+    if (presets.length <= 1) return;
+    clearPersisted(`logic-chain:${name}`);
+    const next = presets.filter((p) => p !== name);
+    updatePresets((prev) => prev.filter((p) => p !== name));
+    setSuggestedTopics((prev) => prev.filter((t) => t !== name));
+    if (chain === name) {
+      selectTopic(next[0] ?? DEFAULT_CHAIN);
+    }
+  };
+
+  const applyCustomTopic = () => {
+    const name = topicInput.trim();
+    if (!name) return;
+    ensurePreset(name);
+    selectTopic(name);
+  };
 
   const newChain = () => {
     const name = `新建链 ${presets.length + 1}`;
-    setPresets((p) => [...p, name]);
-    setChain(name);
+    ensurePreset(name);
+    selectTopic(name);
+  };
+
+  const suggestTopics = async () => {
+    setSuggesting(true);
+    setSuggestError(null);
+    try {
+      const wire = await api.suggestLogicChainTopics(topicInput.trim());
+      if (wire.error || wire.topics.length === 0) {
+        setSuggestError(wire.error || "未能推荐主题");
+        return;
+      }
+      setSuggestedTopics(wire.topics);
+      updatePresets((prev) => {
+        const merged = [...prev];
+        for (const t of wire.topics) {
+          if (!merged.includes(t)) merged.push(t);
+        }
+        return merged;
+      });
+    } catch (e) {
+      setSuggestError(formatAgentError(e, "推荐"));
+    } finally {
+      setSuggesting(false);
+    }
   };
 
   const generate = async () => {
@@ -256,8 +328,7 @@ export function LogicChain() {
         setGenVersion((v) => v + 1); // remount Flow to load the generated graph
       }
     } catch (e) {
-      const detail = e instanceof Error ? e.message : "未知错误";
-      setGenError(`生成失败: ${detail}（需后端运行且已配置 LLM key）`);
+      setGenError(formatAgentError(e, "生成"));
     } finally {
       setGenerating(false);
     }
@@ -265,28 +336,102 @@ export function LogicChain() {
 
   return (
     <div className="mx-auto max-w-[1400px] p-6">
-      <div className="mb-3 flex flex-wrap gap-1.5">
-        {presets.map((p) => (
+      <div className="mb-3">
+        <p className="mb-2 text-xs text-muted-foreground">预设主题（点击切换 · × 删除，至少保留 1 条）</p>
+        <div className="flex flex-wrap gap-1.5">
+          {presets.map((p) => {
+            const active = chain === p;
+            return (
+              <div
+                key={p}
+                className={cn(
+                  "inline-flex items-stretch overflow-hidden rounded-md border text-sm transition-colors",
+                  active ? "border-primary bg-primary text-primary-foreground" : "bg-card text-muted-foreground",
+                )}
+              >
+                <button
+                  type="button"
+                  onClick={() => selectTopic(p)}
+                  className={cn(
+                    "max-w-[220px] truncate px-3 py-1 text-left hover:opacity-90",
+                    !active && "hover:text-foreground",
+                  )}
+                  title={p}
+                >
+                  {p}
+                </button>
+                {presets.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => deletePreset(p)}
+                    className={cn(
+                      "inline-flex items-center border-l px-1.5 hover:bg-black/10",
+                      active ? "border-primary-foreground/30" : "border-border hover:text-danger",
+                    )}
+                    aria-label={`删除主题 ${p}`}
+                    title="删除此主题"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            );
+          })}
           <button
-            key={p}
             type="button"
-            onClick={() => setChain(p)}
-            className={cn(
-              "rounded-md border px-3 py-1 text-sm transition-colors",
-              chain === p ? "border-primary bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:text-foreground",
-            )}
+            onClick={newChain}
+            className="rounded-md border border-dashed px-3 py-1 text-sm text-muted-foreground hover:text-foreground"
           >
-            {p}
+            + 新建链
           </button>
-        ))}
+        </div>
+      </div>
+
+      <div className="mb-3 flex flex-wrap items-end gap-2">
+        <label className="flex min-w-[280px] flex-1 flex-col gap-1">
+          <span className="text-xs text-muted-foreground">自定义主题</span>
+          <input
+            value={topicInput}
+            onChange={(e) => setTopicInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && applyCustomTopic()}
+            placeholder="输入逻辑链主题，如「储能政策→锂电链受益」"
+            className="rounded-md border bg-background px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+          />
+        </label>
         <button
           type="button"
-          onClick={newChain}
-          className="rounded-md border border-dashed px-3 py-1 text-sm text-muted-foreground hover:text-foreground"
+          onClick={applyCustomTopic}
+          className="rounded-md border bg-card px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground"
         >
-          + 新建链
+          应用主题
+        </button>
+        <button
+          type="button"
+          onClick={suggestTopics}
+          disabled={suggesting}
+          className="inline-flex items-center gap-1.5 rounded-md border border-primary/30 bg-primary/5 px-3 py-1.5 text-sm text-primary hover:bg-primary/10 disabled:opacity-60"
+        >
+          {suggesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+          Agent 推荐主题
         </button>
       </div>
+
+      {suggestedTopics.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-1.5">
+          <span className="text-xs text-muted-foreground">推荐:</span>
+          {suggestedTopics.map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => selectTopic(t)}
+              className="rounded-full border border-dashed border-primary/40 px-2.5 py-0.5 text-xs text-primary hover:bg-primary/5"
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+      )}
+      {suggestError && <p className="mb-3 text-xs text-danger">{suggestError}</p>}
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <button
@@ -299,7 +444,7 @@ export function LogicChain() {
           {generating ? "Agent 联网研究中…" : "用 Agent 生成本链"}
         </button>
         <span className="text-xs text-muted-foreground">
-          调用 Vibe-Trading Agent（web_search 联网）生成「{chain}」的真实逻辑链，标的节点挂实时行情
+          当前主题「{chain}」· 未 Agent 生成时显示骨架链（触发→传导→板块→标的）· 生成后覆盖并本地缓存
         </span>
         {genError && <span className="text-xs text-danger">{genError}</span>}
       </div>

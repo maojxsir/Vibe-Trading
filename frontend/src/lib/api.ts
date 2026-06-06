@@ -96,12 +96,19 @@ export interface NewsItemWire {
   summary: string;
   url: string;
   tickers: string[];
+  supplier?: string;
+}
+export interface NewsProviderWire {
+  ok: boolean;
+  count: number;
+  error?: string | null;
 }
 export interface MarketNewsWire {
   items: NewsItemWire[];
   updatedAt: string;
   source: string;
   stale: boolean;
+  providers?: Record<string, NewsProviderWire>;
 }
 export interface LogicChainNodeWire {
   id: string;
@@ -115,6 +122,22 @@ export interface LogicChainGenWire {
   edges: { source: string; target: string }[];
   error: string | null;
 }
+export interface LogicChainSuggestWire {
+  topics: string[];
+  error: string | null;
+}
+export interface ModuleStockWire {
+  name: string;
+  code: string;
+  industry: string;
+  module: string;
+  heatBase: number;
+  logic: string;
+}
+export interface ModuleStocksGenWire {
+  stocks: ModuleStockWire[];
+  error: string | null;
+}
 
 export const api = {
   uploadFile,
@@ -122,10 +145,21 @@ export const api = {
   getQuotes: (codes: string[]) =>
     request<MarketQuotesWire>(`/market/quotes?codes=${encodeURIComponent(codes.join(","))}`),
   getNews: () => request<MarketNewsWire>("/market/news"),
+  getComNews: (limit = 80) => request<MarketNewsWire>(`/com/news?limit=${limit}`),
   generateLogicChain: (topic: string) =>
     request<LogicChainGenWire>("/market/logic-chain/generate", {
       method: "POST",
       body: JSON.stringify({ topic }),
+    }),
+  suggestLogicChainTopics: (hint = "") =>
+    request<LogicChainSuggestWire>("/market/logic-chain/suggest-topics", {
+      method: "POST",
+      body: JSON.stringify({ hint }),
+    }),
+  generateModuleStocks: (theme: string, module: string) =>
+    request<ModuleStocksGenWire>("/market/module-stocks/generate", {
+      method: "POST",
+      body: JSON.stringify({ theme, module }),
     }),
   listRuns: () => request<RunListItem[]>("/runs"),
   getRun: (id: string) => request<RunData>(`/runs/${id}`),
@@ -211,6 +245,14 @@ export const api = {
     }),
   alphaBenchStreamUrl: (jobId: string) =>
     withAuthQuery(`${BASE}/alpha/bench/${encodeURIComponent(jobId)}/stream`),
+  getAlphaScores: (codes: string[], params: AlphaScoreParams = {}) => {
+    const q = new URLSearchParams();
+    q.set("codes", codes.join(","));
+    if (params.zoo) q.set("zoo", params.zoo);
+    if (params.universe) q.set("universe", params.universe);
+    if (params.period) q.set("period", params.period);
+    return request<AlphaStockScoreWire>(`/alpha/score?${q.toString()}`);
+  },
 
   // Connector runtime channel — privileged surface actions (NOT agent tools).
   // commit is the ONLY action that writes a mandate; halt trips the kill switch.
@@ -731,6 +773,29 @@ export interface AlphaBenchResult {
   top5_by_ir: AlphaBenchTopRow[];
   dead_examples: AlphaBenchTopRow[];
   by_theme: Record<string, { alive: number; reversed: number; dead: number }>;
+}
+
+export interface AlphaScoreParams {
+  zoo?: string;
+  universe?: string;
+  period?: string;
+}
+
+export interface AlphaStockScoreRow {
+  code: string;
+  ts_code: string;
+  composite: number;
+  score: number;
+  percentile: number;
+  label: string;
+}
+
+export interface AlphaStockScoreWire {
+  status: string;
+  stale: boolean;
+  error?: string;
+  scores: Record<string, AlphaStockScoreRow | null>;
+  meta?: Record<string, unknown>;
 }
 
 // --- Connector runtime channel types ---

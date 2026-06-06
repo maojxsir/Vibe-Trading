@@ -1,6 +1,7 @@
 from src.api.market_quotes import parse_tencent_line, parse_tencent_payload
 from src.api.market_news import parse_sina_news, tag_tickers
-from src.api.logic_chain import extract_chain_json
+from src.api.logic_chain import extract_chain_json, extract_topics_json
+from src.api.module_stocks import extract_module_stocks_json
 
 
 def test_parse_tencent_index_line():
@@ -105,3 +106,40 @@ def test_extract_chain_json_raises_on_empty():
         extract_chain_json("")
     with pytest.raises(ValueError):
         extract_chain_json("no json here")
+
+
+def test_extract_module_stocks_json_fenced():
+    text = (
+        "```json\n"
+        '{"stocks":[{"name":"中际旭创","code":"300308","industry":"光模块",'
+        '"module":"光模块","heatBase":90,"logic":"800G龙头"}]}\n'
+        "```"
+    )
+    rows = extract_module_stocks_json(text, default_module="光模块")
+    assert len(rows) == 1
+    assert rows[0]["code"] == "300308"
+    assert rows[0]["heatBase"] == 90
+
+
+def test_extract_module_stocks_json_drops_bad_rows():
+    text = (
+        '[{"name":"好","code":"300308","industry":"光","module":"光模块","heatBase":80,"logic":"ok"},'
+        '{"name":"坏","code":"abc","industry":"x","module":"光模块","heatBase":50,"logic":"bad"}]'
+    )
+    rows = extract_module_stocks_json(text, default_module="光模块")
+    assert len(rows) == 1
+    assert rows[0]["name"] == "好"
+
+
+def test_extract_module_stocks_json_raises_on_empty():
+    import pytest
+
+    with pytest.raises(ValueError):
+        extract_module_stocks_json("", default_module="光模块")
+
+
+def test_extract_topics_json_fenced():
+    text = '```json\n["算力租赁涨价→IDC重估","H200解禁→光模块受益"]\n```'
+    topics = extract_topics_json(text)
+    assert len(topics) == 2
+    assert "光模块" in topics[1]

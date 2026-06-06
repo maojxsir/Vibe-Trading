@@ -37,24 +37,76 @@ export const KIND_DOT: Record<ChainKind, string> = {
   target: "bg-emerald-500",
 };
 
-// Top preset chains (chips).
+// Top preset chains (chips). Default list — user edits persist in localStorage.
 export const CHAIN_PRESETS: string[] = [
   "算力租赁暴涨链",
   "霍尔木兹封锁→能源危机",
   "石油美元崩溃→人民币崛起",
   "中美AI竞争→西芯东电",
-  "AI泡沫→次贷2.0(2028)",
   "中国能源独立→制造业称霸",
   "白银硬大战→定价权东移",
   "文生视频→内容产业重构",
-  "DeepSeek→美元霸权动摇",
-  "特朗普控→信用耗尽",
-  "日本五条→订单东移中国",
-  "A股新蓄水池→财富大转移",
-  "美国衰落→总督模式接守",
 ];
 
 export const DEFAULT_CHAIN = "中美AI竞争→西芯东电";
+
+const COLUMN_X: Record<ChainKind, number> = { trigger: 0, transmit: 340, sector: 680, target: 1020 };
+
+/** Minimal 4-node chain so every topic has valid edges before Agent runs. */
+export function buildSkeletonGraph(topic: string): { nodes: ChainNode[]; edges: Edge[] } {
+  const headline = topic.length > 16 ? `${topic.slice(0, 15)}…` : topic;
+  const nodes: ChainNode[] = [
+    {
+      id: "sk-t1",
+      type: "chainNode",
+      position: { x: COLUMN_X.trigger, y: 120 },
+      data: { kind: "trigger", label: headline, desc: "核心触发事件或宏观变量（可 Agent 生成）" },
+    },
+    {
+      id: "sk-m1",
+      type: "chainNode",
+      position: { x: COLUMN_X.transmit, y: 120 },
+      data: { kind: "transmit", label: "传导机制", desc: "事件如何影响产业链与预期" },
+    },
+    {
+      id: "sk-s1",
+      type: "chainNode",
+      position: { x: COLUMN_X.sector, y: 120 },
+      data: { kind: "sector", label: "受益板块", desc: "可能受益的细分环节" },
+    },
+    {
+      id: "sk-g1",
+      type: "chainNode",
+      position: { x: COLUMN_X.target, y: 120 },
+      data: { kind: "target", label: "具体标的", desc: "A股核心受益标的（Agent 生成后带代码）" },
+    },
+  ];
+  const edges: Edge[] = [
+    { id: "e-sk-t-m", source: "sk-t1", target: "sk-m1" },
+    { id: "e-sk-m-s", source: "sk-m1", target: "sk-s1" },
+    { id: "e-sk-s-g", source: "sk-s1", target: "sk-g1" },
+  ];
+  return { nodes, edges };
+}
+
+/** Load graph: localStorage → default seed (中美AI) → skeleton for other topics. */
+export function loadChainGraph(chain: string): { nodes: ChainNode[]; edges: Edge[] } {
+  try {
+    const raw = localStorage.getItem(`vt-logic-chain:${chain}`);
+    if (raw) {
+      const parsed = JSON.parse(raw) as { nodes?: ChainNode[]; edges?: Edge[] };
+      if (Array.isArray(parsed.nodes) && parsed.nodes.length > 0) {
+        return { nodes: parsed.nodes, edges: parsed.edges ?? [] };
+      }
+    }
+  } catch {
+    /* ignore corrupt cache */
+  }
+  if (chain === DEFAULT_CHAIN) {
+    return { nodes: defaultNodes, edges: defaultEdges };
+  }
+  return buildSkeletonGraph(chain);
+}
 
 // Default graph for the selected preset (screenshot 4).
 export const defaultNodes: ChainNode[] = [

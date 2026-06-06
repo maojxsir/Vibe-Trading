@@ -1,68 +1,27 @@
-"""Pure news-fetching/parsing for the 新闻 (news) page.
+"""Backward-compatible news helpers.
 
-Kept free of FastAPI so parsing can be unit-tested without the web framework.
-Fetches the free Sina rolling finance news feed (JSON) and normalizes it into
-``{source, time, title, summary, url, tickers}`` rows. ``tickers`` is a best
-effort keyword match against the watchlist names so news can be tagged.
+New code should use :mod:`src.com.news` for multi-source merge. This module
+re-exports parsing helpers used by tests and a thin ``fetch_news`` wrapper.
 """
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Dict, List
 
-import httpx
-
-# Sina rolling news, lid=2509 is the finance channel. Free, no key.
-_SINA_NEWS_URL = (
-    "https://feed.mix.sina.com.cn/api/roll/get?pageid=153&lid=2509&num=20&page=1"
-)
-
-# Names used to tag a headline with related tickers (best effort substring match).
-WATCHLIST_NAMES: List[str] = [
-    "绿的谐波", "三花智控", "拓普集团", "双环传动", "汇川技术", "兆威机电",
-    "中际旭创", "沪电股份", "胜宏科技", "天孚通信", "寒武纪", "海光信息",
-    "光模块", "减速器", "丝杠", "PCB", "人形机器人", "算力", "AI芯片",
-]
-
-
-def _fmt_time(ctime: object) -> str:
-    """Sina ctime is an epoch-second string; format to ``YYYY-MM-DD HH:MM``."""
-    try:
-        return datetime.fromtimestamp(int(str(ctime))).strftime("%Y-%m-%d %H:%M")
-    except (ValueError, OSError, TypeError):
-        return ""
-
-
-def tag_tickers(text: str) -> List[str]:
-    return [name for name in WATCHLIST_NAMES if name in text]
+from src.com.news import fetch_merged_news
+from src.com.news.providers.sina import parse_sina_payload
+from src.com.news.tags import WATCHLIST_NAMES, tag_tickers
 
 
 def parse_sina_news(payload: Dict) -> List[Dict[str, object]]:
-    """Parse a Sina rolling-news JSON payload into normalized news rows."""
-    items = (((payload or {}).get("result") or {}).get("data")) or []
-    rows: List[Dict[str, object]] = []
-    for it in items:
-        if not isinstance(it, dict):
-            continue
-        title = (it.get("title") or "").strip()
-        if not title:
-            continue
-        summary = (it.get("intro") or "").strip()
-        rows.append({
-            "source": it.get("media_name") or "新浪财经",
-            "time": _fmt_time(it.get("ctime")),
-            "title": title,
-            "summary": summary,
-            "url": it.get("url") or "",
-            "tickers": tag_tickers(f"{title} {summary}"),
-        })
-    return rows
+    """Parse Sina JSON (legacy name for unit tests)."""
+    return parse_sina_payload(payload, supplier="sina_finance")
 
 
 async def fetch_news() -> List[Dict[str, object]]:
-    async with httpx.AsyncClient(timeout=8.0, headers={"User-Agent": "Mozilla/5.0"}) as client:
-        resp = await client.get(_SINA_NEWS_URL)
-        resp.raise_for_status()
-        payload = resp.json()
-    return parse_sina_news(payload)
+    """Return merged news rows (delegates to com layer)."""
+    result = await fetch_merged_news(limit=80)
+    return list(result.get("items") or [])
+
+
+__all__ = ["WATCHLIST_NAMES", "fetch_news", "parse_sina_news", "tag_tickers"]

@@ -330,6 +330,53 @@ def register_alpha_routes(
         }
 
     # -----------------------------------------------------------------------
+    # GET /alpha/score — composite factor scores for watchlist codes
+    # (Must be registered before /alpha/{alpha_id} so "score" is not captured.)
+    # -----------------------------------------------------------------------
+
+    @app.get("/alpha/score", dependencies=[Depends(require_auth)])
+    async def alpha_stock_score(
+        codes: str = Query(..., min_length=1, max_length=512),
+        zoo: str = Query("gtja191", max_length=64),
+        universe: str = Query("csi300", max_length=64),
+        period: str = Query("2024-2025", max_length=32),
+    ) -> dict[str, Any]:
+        """Score A-share codes using bench-validated alphas (gtja191·csi300 default)."""
+        if zoo not in _VALID_ZOOS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"unknown zoo {zoo!r}; expected one of {sorted(_VALID_ZOOS)}",
+            )
+        allowed_univ = {"csi300", "sp500", "btc-usdt"}
+        if universe not in allowed_univ:
+            raise HTTPException(
+                status_code=400,
+                detail=f"unknown universe {universe!r}; expected one of {sorted(allowed_univ)}",
+            )
+        from src.tools.alpha_bench_tool import _parse_period
+
+        try:
+            _parse_period(period)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"invalid period: {exc}")
+
+        code_list = [c.strip() for c in codes.split(",") if c.strip()]
+        if not code_list:
+            raise HTTPException(status_code=400, detail="codes must not be empty")
+        if len(code_list) > 30:
+            raise HTTPException(status_code=400, detail="at most 30 codes per request")
+
+        from src.api.alpha_stock_score import score_stocks
+
+        return await asyncio.to_thread(
+            score_stocks,
+            code_list,
+            zoo=zoo,
+            universe=universe,
+            period=period,
+        )
+
+    # -----------------------------------------------------------------------
     # GET /alpha/{alpha_id}
     # -----------------------------------------------------------------------
 

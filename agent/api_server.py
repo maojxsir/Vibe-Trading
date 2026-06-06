@@ -3071,7 +3071,9 @@ register_alpha_routes(app)
 # ============================================================================
 
 from src.api.market_routes import router as market_router  # noqa: E402
+from src.api.com_routes import router as com_router  # noqa: E402
 app.include_router(market_router)
+app.include_router(com_router)
 
 
 # ============================================================================

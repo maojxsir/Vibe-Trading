@@ -4,8 +4,7 @@ Kept free of FastAPI so the parsing logic can be unit-tested without the web
 framework installed. The HTTP layer uses httpx.
 
 Fetches free public quotes from Tencent (`qt.gtimg.cn`). Returns a flat
-``code -> {name, price, change_pct}`` map that the frontend overlays onto its
-own seed data, so a partial upstream failure never breaks the page.
+``code -> {name, price, change_pct}`` map for the frontend to render directly.
 """
 
 from __future__ import annotations
@@ -23,8 +22,8 @@ OVERVIEW_CODES = [
     "sh000001", "sz399001", "sz399006", "sh000300", "usDJI", "usIXIC", "usINX",
     # 人形机器人·核心标的
     "sh688017", "sz002050", "sh601689", "sz002472", "sz300124", "sz003021",
-    # AI算力·核心标的
-    "sz300308", "sz002463", "sz300476", "sz300394", "sh688256", "sh688041",
+    # AI算力·核心标的 (same four as AI算力 page coreFour)
+    "sz300308", "sz002463", "sz300476", "sz300394",
 ]
 
 

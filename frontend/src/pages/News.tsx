@@ -17,6 +17,7 @@ export function News() {
   const [rows, setRows] = useState<NewsRow[]>(seedRows);
   const [stale, setStale] = useState(true);
   const [updatedAt, setUpdatedAt] = useState("");
+  const [sourceLabel, setSourceLabel] = useState("");
   const [loading, setLoading] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -29,6 +30,7 @@ export function News() {
         setRows(wire.items);
         setStale(false);
         setUpdatedAt(wire.updatedAt);
+        setSourceLabel(wire.source);
       }
     } catch {
       setStale(true);
@@ -89,6 +91,7 @@ export function News() {
 
       <p className="mt-4 text-xs text-muted-foreground">
         更新: {updatedAt || "—"}
+        {!stale && sourceLabel && <span className="ml-2">· 多源: {sourceLabel}</span>}
         {stale && <span className="ml-1 text-warning">（新闻源暂不可用, 显示缓存示例）</span>}
       </p>
     </div>

@@ -17,6 +17,76 @@ from typing import Dict, List
 KINDS = {"trigger", "transmit", "sector", "target"}
 
 
+def build_suggest_prompt(hint: str = "") -> str:
+    """Ask the agent for logic-chain topic titles only."""
+    extra = f"参考方向或关键词：{hint.strip()}\n" if hint and hint.strip() else ""
+    return (
+        "你是A股宏观、产业链与事件传导研究员。\n"
+        f"{extra}"
+        "请推荐 6 个适合画「逻辑链」图的主题标题，格式类似「事件/趋势→影响结果」，"
+        "例如「H200解禁→光模块受益」「算力租赁涨价→IDC 重估」。\n"
+        "主题应具体、可研究，覆盖不同赛道（AI算力、能源、机器人、宏观等）。\n\n"
+        "最终只输出一个 JSON 字符串数组（不要任何多余文字），用 ```json 代码块包裹。\n"
+        '示例：["主题一","主题二"]'
+    )
+
+
+def _find_json_array(text: str) -> str:
+    fenced = re.search(r"```(?:json)?\s*(\[.*?\])\s*```", text, re.S)
+    if fenced:
+        return fenced.group(1)
+    start = text.find("[")
+    if start < 0:
+        raise ValueError("no JSON array found")
+    depth = 0
+    for i in range(start, len(text)):
+        if text[i] == "[":
+            depth += 1
+        elif text[i] == "]":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    raise ValueError("unbalanced JSON array")
+
+
+def extract_topics_json(text: str) -> List[str]:
+    """Parse agent answer into a list of topic strings."""
+    if not text or not text.strip():
+        raise ValueError("empty agent answer")
+    data = json.loads(_find_json_array(text))
+    if not isinstance(data, list):
+        raise ValueError("expected JSON array")
+    topics: List[str] = []
+    seen: set[str] = set()
+    for item in data:
+        topic = str(item or "").strip()
+        if topic and topic not in seen:
+            topics.append(topic)
+            seen.add(topic)
+    if not topics:
+        raise ValueError("no valid topics in agent answer")
+    return topics[:8]
+
+
+def suggest_logic_chain_topics(hint: str = "", max_iterations: int = 8) -> List[str]:
+    """Run the agent to recommend logic-chain topic titles."""
+    from src.tools import build_registry
+    from src.providers.chat import ChatLLM
+    from src.agent.loop import AgentLoop
+    from src.memory.persistent import PersistentMemory
+    from src.config.loader import load_agent_config
+
+    pm = PersistentMemory()
+    registry = build_registry(
+        persistent_memory=pm,
+        include_shell_tools=False,
+        agent_config=load_agent_config(),
+    )
+    agent = AgentLoop(registry=registry, llm=ChatLLM(), max_iterations=max_iterations, persistent_memory=pm)
+    result = agent.run(build_suggest_prompt(hint))
+    return extract_topics_json(result.get("content") or "")
+
+
 def build_prompt(topic: str) -> str:
     """Build the agent prompt that asks for a strict JSON logic chain."""
     return (
