@@ -1,6 +1,6 @@
 ﻿import { useEffect, useState } from "react";
 import { Link, Outlet, useLocation, useSearchParams } from "react-router-dom";
-import { BarChart3, Bot, Moon, Sun, Plus, Trash2, Pencil, MessageSquare, ChevronsLeft, ChevronsRight, Settings, Layers, Loader2 } from "lucide-react";
+import { BarChart3, Bot, Moon, Sun, Plus, Trash2, Pencil, MessageSquare, ChevronsLeft, ChevronsRight, Settings, Layers, Loader2, LayoutDashboard, ClipboardList, ListChecks, Share2, Cpu, Zap, Compass, Activity, Newspaper, Grid3x3 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDarkMode } from "@/hooks/useDarkMode";
 import { api, type SessionItem } from "@/lib/api";
@@ -11,11 +11,19 @@ import { ConnectionBanner } from "@/components/layout/ConnectionBanner";
 const APP_VERSION = "v0.1.9";
 
 const NAV = [
-  { to: "/", icon: BarChart3, label: "Home" },
+  { to: "/", icon: LayoutDashboard, label: "Home" },
+  { to: "/holdings", icon: ClipboardList, label: "持仓决策" },
+  { to: "/opportunities", icon: ListChecks, label: "机会清单" },
+  { to: "/logic-chain", icon: Share2, label: "逻辑链" },
   { to: "/agent", icon: Bot, label: "Agent" },
+  { to: "/humanoid", icon: Cpu, label: "人形机器人" },
+  { to: "/ai-compute", icon: Zap, label: "AI算力" },
+  { to: "/serenity", icon: Compass, label: "Serenity 方法论" },
+  { to: "/events", icon: Activity, label: "事件概率" },
+  { to: "/news", icon: Newspaper, label: "新闻" },
   { to: "/alpha-zoo", icon: Layers, label: "Alpha Zoo" },
   { to: "/settings", icon: Settings, label: "Settings" },
-  { to: "/correlation", icon: BarChart3, label: "Correlation Matrix" },
+  { to: "/correlation", icon: Grid3x3, label: "Correlation Matrix" },
 ];
 
 export function Layout() {

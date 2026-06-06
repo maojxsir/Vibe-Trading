@@ -71,8 +71,22 @@ function appendQueryParam(url: string, key: string, value: string): string {
   return `${url}${sep}${encodeURIComponent(key)}=${encodeURIComponent(value)}`;
 }
 
+export interface MarketQuoteWire {
+  code: string;
+  name: string;
+  price: number;
+  change_pct: number;
+}
+export interface MarketOverviewWire {
+  quotes: Record<string, MarketQuoteWire>;
+  updatedAt: string;
+  source: string;
+  stale: boolean;
+}
+
 export const api = {
   uploadFile,
+  getMarketOverview: () => request<MarketOverviewWire>("/market/overview"),
   listRuns: () => request<RunListItem[]>("/runs"),
   getRun: (id: string) => request<RunData>(`/runs/${id}`),
   getRunCode: (id: string) => request<Record<string, string>>(`/runs/${id}/code`),
