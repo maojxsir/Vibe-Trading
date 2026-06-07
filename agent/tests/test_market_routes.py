@@ -4,6 +4,22 @@ from src.api.logic_chain import extract_chain_json, extract_topics_json
 from src.api.module_stocks import extract_module_stocks_json
 
 
+def _route_client():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from src.api.market_routes import router
+
+    app = FastAPI()
+    app.include_router(router)
+    try:
+        from src.api.market_routes import holdings_router
+
+        app.include_router(holdings_router)
+    except ImportError:
+        pass
+    return TestClient(app)
+
+
 def test_parse_tencent_index_line():
     raw = 'v_sh000001="1~上证指数~000001~4083.97~4075.00~8.97~123~456~789";'
     q = parse_tencent_line(raw)
@@ -12,6 +28,42 @@ def test_parse_tencent_index_line():
     assert q["name"] == "上证指数"
     assert q["price"] == 4083.97
     assert q["change_pct"] == 0.22  # (4083.97-4075)/4075*100
+
+
+def test_symbols_search_returns_results(monkeypatch):
+    from src.api import symbol_index
+
+    monkeypatch.setattr(
+        symbol_index,
+        "load_index",
+        lambda: [{"code": "688017", "name": "绿的谐波", "cnspell": "LDXB", "ts_code": "688017.SH"}],
+    )
+    response = _route_client().get("/market/symbols/search", params={"q": "688"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["results"][0]["code"] == "688017"
+
+
+def test_holdings_parse_screenshot_route_returns_rows(monkeypatch):
+    from src.api import holdings_parse
+
+    monkeypatch.setattr(
+        holdings_parse,
+        "parse_holdings_image",
+        lambda _data: {
+            "rows": [{"code": "688017", "name": "绿的谐波", "cost": 248.5, "position": 42, "confidence": 0.95}],
+            "meta": {"ocr_chars": 1200, "model": "deepseek", "warnings": []},
+        },
+    )
+    response = _route_client().post(
+        "/holdings/parse-screenshot",
+        files={"file": ("holdings.png", b"fake image", "image/png")},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["rows"][0]["code"] == "688017"
 
 
 def test_parse_tencent_negative_change():

@@ -89,6 +89,36 @@ export interface MarketQuotesWire {
   source: string;
   stale: boolean;
 }
+export interface SymbolSearchResultWire {
+  code: string;
+  name: string;
+  ts_code: string;
+  cnspell: string;
+}
+export interface SymbolSearchWire {
+  status: "ok" | "error";
+  results: SymbolSearchResultWire[];
+  message?: string;
+}
+export interface HoldingImportRowWire {
+  code: string;
+  name: string;
+  cost: number;
+  position?: number | null;
+  shares?: number | null;
+  confidence: number;
+  warnings?: string[];
+  action?: "update" | "append";
+}
+export interface HoldingsParseWire {
+  status: "ok";
+  rows: HoldingImportRowWire[];
+  meta: {
+    ocr_chars?: number;
+    model?: string;
+    warnings?: string[];
+  };
+}
 export interface NewsItemWire {
   source: string;
   time: string;
@@ -144,6 +174,29 @@ export const api = {
   getMarketOverview: () => request<MarketOverviewWire>("/market/overview"),
   getQuotes: (codes: string[]) =>
     request<MarketQuotesWire>(`/market/quotes?codes=${encodeURIComponent(codes.join(","))}`),
+  searchSymbols: (q: string, boost: string[] = [], limit = 12) => {
+    const params = new URLSearchParams();
+    if (q) params.set("q", q);
+    if (boost.length) params.set("boost", boost.join(","));
+    params.set("limit", String(limit));
+    return request<SymbolSearchWire>(`/market/symbols/search?${params.toString()}`);
+  },
+  parseHoldingsScreenshot: async (file: File, existingCodes: string[] = []) => {
+    const form = new FormData();
+    form.append("file", file);
+    const params = new URLSearchParams();
+    if (existingCodes.length) params.set("existing_codes", existingCodes.join(","));
+    const qs = params.toString();
+    const res = await fetch(`${BASE}/holdings/parse-screenshot${qs ? `?${qs}` : ""}`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: form,
+    });
+    if (!res.ok) {
+      throw await errorFromResponse(res);
+    }
+    return res.json() as Promise<HoldingsParseWire>;
+  },
   getNews: () => request<MarketNewsWire>("/market/news"),
   getComNews: (limit = 80) => request<MarketNewsWire>(`/com/news?limit=${limit}`),
   generateLogicChain: (topic: string) =>

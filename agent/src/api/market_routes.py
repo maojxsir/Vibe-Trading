@@ -11,14 +11,16 @@ import logging
 from datetime import datetime
 from typing import Dict, List
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel
 
+from src.api import holdings_parse, symbol_index
 from src.api.market_quotes import OVERVIEW_CODES, fetch_quotes
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/market", tags=["market"])
+holdings_router = APIRouter(prefix="/holdings", tags=["holdings"])
 
 
 class GenerateChainRequest(BaseModel):
@@ -35,6 +37,8 @@ class GenerateModuleStocksRequest(BaseModel):
 
 # Cap how many codes a single quote request may ask for (abuse / URL length).
 _MAX_CODES = 60
+_MAX_SCREENSHOT_BYTES = 8 * 1024 * 1024
+_ALLOWED_SCREENSHOT_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
 
 @router.get("/overview")
@@ -66,6 +70,55 @@ async def market_quotes(codes: str = Query("", description="Comma-separated Tenc
     except Exception as exc:  # noqa: BLE001
         logger.warning("market_quotes upstream failed: %s", exc)
         return {"quotes": {}, "updatedAt": now, "source": "腾讯财经", "stale": True}
+
+
+@router.get("/symbols/search")
+async def symbols_search(
+    q: str = Query("", description="Code, Chinese name, or pinyin abbreviation"),
+    boost: str = Query("", description="Comma-separated boosted bare six-digit codes"),
+    limit: int = Query(12, ge=1, le=30),
+) -> Dict[str, object]:
+    """Search the cached A-share symbol index for holdings autocomplete."""
+    boost_codes = {c.strip() for c in boost.split(",") if c.strip()}
+    if not q.strip() and not boost_codes:
+        boost_codes = symbol_index.default_boost_codes()
+    try:
+        rows = symbol_index.load_index()
+        results = symbol_index.search_symbols(q, rows, boost=boost_codes, limit=limit)
+        return {"status": "ok", "results": results}
+    except Exception as exc:  # noqa: BLE001 - keep UI resilient
+        logger.warning("symbols_search failed: %s", exc)
+        return {"status": "error", "results": [], "message": "标的库暂不可用"}
+
+
+@holdings_router.post("/parse-screenshot")
+async def holdings_parse_screenshot(
+    file: UploadFile,
+    existing_codes: str = Query("", description="Comma-separated existing holding codes"),
+) -> Dict[str, object]:
+    """Parse a broker holdings screenshot into preview rows."""
+    if file.content_type not in _ALLOWED_SCREENSHOT_TYPES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="unsupported_image_type")
+    data = await file.read()
+    if len(data) > _MAX_SCREENSHOT_BYTES:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="file_too_large")
+    try:
+        parsed = holdings_parse.parse_holdings_image(data)
+    except ValueError as exc:
+        code = str(exc).split(":", 1)[0]
+        http_status = status.HTTP_400_BAD_REQUEST if code in {"ocr_empty", "ocr_failed"} else status.HTTP_422_UNPROCESSABLE_ENTITY
+        raise HTTPException(status_code=http_status, detail=code) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("holdings_parse_screenshot failed: %s", exc)
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="parse_failed") from exc
+
+    existing = {c.strip() for c in existing_codes.split(",") if c.strip()}
+    rows = parsed.get("rows", [])
+    if existing:
+        for row in rows:
+            if isinstance(row, dict):
+                row["action"] = "update" if str(row.get("code") or "") in existing else "append"
+    return {"status": "ok", "rows": rows, "meta": parsed.get("meta", {})}
 
 
 @router.get("/news")

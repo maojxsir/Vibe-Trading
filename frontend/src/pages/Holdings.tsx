@@ -1,15 +1,19 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Pencil, Plus, RefreshCw, RotateCcw, Trash2, Bot, Loader2 } from "lucide-react";
+import { Pencil, Plus, RefreshCw, RotateCcw, Trash2, Bot, Loader2, FileUp } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { Card } from "@/components/dashboard/Card";
 import { Badge } from "@/components/dashboard/Badge";
+import { StockSymbolCombobox } from "@/components/dashboard/StockSymbolCombobox";
+import { HoldingsImportModal } from "@/components/holdings/HoldingsImportModal";
 import { holdingsSeed, type DecisionAction, type Holding } from "@/data/holdingsSeed";
 import { useLiveQuotes } from "@/hooks/useLiveQuotes";
 import { loadPersisted, savePersisted, clearPersisted } from "@/lib/persist";
 import { changeColorClass, fmtPct, fmtPrice } from "@/lib/cn-market";
-import { api } from "@/lib/api";
+import { api, type HoldingImportRowWire } from "@/lib/api";
+import { mergeHoldings } from "@/lib/holdings-merge";
+import { loadRecent, pushRecent } from "@/lib/recent-symbols";
 import { cn } from "@/lib/utils";
 
 const STORE = "holdings";
@@ -20,16 +24,26 @@ const ACTION_TONE: Record<DecisionAction, "danger" | "success" | "neutral" | "wa
   持有: "neutral",
   清仓: "warning",
 };
+const SEED_BOOST_CODES = ["688017", "002472", "601689", "002050", "300124", "003021", "300308", "002463", "300476", "300394"];
 
 export function Holdings() {
   const navigate = useNavigate();
   const [rows, setRows] = useState<Holding[]>(() => loadPersisted(STORE, holdingsSeed));
   const [editing, setEditing] = useState(false);
   const [reviewing, setReviewing] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importRows, setImportRows] = useState<HoldingImportRowWire[]>([]);
+  const [importOpen, setImportOpen] = useState(false);
+  const [recentCodes, setRecentCodes] = useState<string[]>(() => loadRecent());
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => savePersisted(STORE, rows), [rows]);
 
   const codes = useMemo(() => rows.map((r) => r.code), [rows]);
+  const boostCodes = useMemo(
+    () => Array.from(new Set([...recentCodes, ...rows.map((r) => r.code), ...SEED_BOOST_CODES])),
+    [recentCodes, rows],
+  );
   const { quotes, stale, updatedAt, loading, refresh } = useLiveQuotes(codes);
 
   const priceOf = (h: Holding) => quotes[h.code]?.price ?? h.price;
@@ -71,6 +85,49 @@ export function Holdings() {
     setRows(holdingsSeed);
   };
 
+  const handleImportFile = useCallback(
+    async (file: File) => {
+      setImporting(true);
+      try {
+        const wire = await api.parseHoldingsScreenshot(file, rows.map((row) => row.code));
+        setImportRows(wire.rows);
+        setImportOpen(true);
+        if (wire.meta.warnings?.length) {
+          toast.warning(`导入提示: ${wire.meta.warnings.join(", ")}`);
+        }
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "截图解析失败");
+      } finally {
+        setImporting(false);
+      }
+    },
+    [rows],
+  );
+
+  useEffect(() => {
+    if (!editing) return;
+    const onPaste = (event: ClipboardEvent) => {
+      const file = Array.from(event.clipboardData?.items ?? [])
+        .find((item) => item.type.startsWith("image/"))
+        ?.getAsFile();
+      if (file) {
+        event.preventDefault();
+        void handleImportFile(file);
+      }
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [editing, handleImportFile]);
+
+  const confirmImport = (selected: HoldingImportRowWire[]) => {
+    setRows((current) => mergeHoldings(current, selected));
+    selected.forEach((row) => pushRecent(row.code));
+    setRecentCodes(loadRecent());
+    setImportOpen(false);
+    setImportRows([]);
+    toast.success(`已导入 ${selected.length} 条持仓`);
+  };
+
   return (
     <div className="mx-auto max-w-7xl p-6">
       <PageHeader
@@ -84,6 +141,29 @@ export function Holdings() {
             <button onClick={() => setEditing((e) => !e)} className={cn("inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm", editing ? "border-primary bg-primary/10 text-primary" : "bg-card text-muted-foreground hover:text-foreground")}>
               <Pencil className="h-4 w-4" /> {editing ? "完成" : "编辑"}
             </button>
+            {editing && (
+              <>
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={importing}
+                  className="inline-flex items-center gap-1.5 rounded-md border bg-card px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground disabled:opacity-60"
+                >
+                  {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />}
+                  从截图导入
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(event) => {
+                    const file = event.currentTarget.files?.[0];
+                    event.currentTarget.value = "";
+                    if (file) void handleImportFile(file);
+                  }}
+                />
+              </>
+            )}
             <button onClick={reviewWithAgent} disabled={reviewing} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-60">
               {reviewing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />}
               {reviewing ? "启动中…" : "用 Agent 复盘"}
@@ -114,10 +194,15 @@ export function Holdings() {
                   <tr key={i} className="border-b border-border/60 last:border-0">
                     <td className="px-3 py-2.5">
                       {editing ? (
-                        <div className="flex gap-1">
-                          <input value={h.name} onChange={(e) => update(i, { name: e.target.value })} className="w-24 rounded border bg-background px-1.5 py-1 text-xs" />
-                          <input value={h.code} onChange={(e) => update(i, { code: e.target.value })} className="w-20 rounded border bg-background px-1.5 py-1 text-xs" />
-                        </div>
+                        <StockSymbolCombobox
+                          value={{ name: h.name, code: h.code }}
+                          boostCodes={boostCodes}
+                          onSelect={(symbol) => {
+                            update(i, { name: symbol.name, code: symbol.code });
+                            pushRecent(symbol.code);
+                            setRecentCodes(loadRecent());
+                          }}
+                        />
                       ) : (
                         <span><span className="font-medium text-foreground">{h.name}</span> <span className="ml-1 text-xs text-muted-foreground">{h.code}</span></span>
                       )}
@@ -153,9 +238,10 @@ export function Holdings() {
           </table>
         </div>
         {editing && (
-          <div className="mt-3 flex gap-2">
+          <div className="mt-3 flex flex-wrap items-center gap-2">
             <button onClick={addRow} className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:text-foreground"><Plus className="h-3 w-3" /> 添加持仓</button>
             <button onClick={reset} className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:text-foreground"><RotateCcw className="h-3 w-3" /> 重置为示例</button>
+            <span className="text-xs text-muted-foreground">截图可能包含账户信息；仅发送到本地后端解析，不会保存图片。</span>
           </div>
         )}
       </Card>
@@ -177,6 +263,14 @@ export function Holdings() {
         现价更新: {updatedAt || "—"}
         {stale && <span className="ml-1 text-warning">（行情源暂不可用, 现价显示示例数据）</span>}
       </p>
+
+      <HoldingsImportModal
+        open={importOpen}
+        rows={importRows}
+        existingCodes={rows.map((row) => row.code)}
+        onCancel={() => setImportOpen(false)}
+        onConfirm={confirmImport}
+      />
     </div>
   );
 }

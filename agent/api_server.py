@@ -3070,9 +3070,10 @@ register_alpha_routes(app)
 # Read-only public quote proxy; no auth (parity with /health, /skills).
 # ============================================================================
 
-from src.api.market_routes import router as market_router  # noqa: E402
+from src.api.market_routes import holdings_router, router as market_router  # noqa: E402
 from src.api.com_routes import router as com_router  # noqa: E402
 app.include_router(market_router)
+app.include_router(holdings_router, dependencies=[Depends(require_local_or_auth)])
 app.include_router(com_router)
 
 
