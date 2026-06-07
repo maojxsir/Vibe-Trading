@@ -32,6 +32,7 @@ interface AgentState {
   getCachedSession: (sid: string) => AgentMessage[] | undefined;
 
   clearStreaming: () => void;
+  clearStatusMessages: () => void;
 
   setSseStatus: (s: AgentState["sseStatus"], retryAttempt?: number) => void;
 
@@ -94,6 +95,9 @@ export const useAgentStore = create<AgentState>((set) => ({
 
   clearStreaming: () => set({ streamingText: "" }),
 
+  clearStatusMessages: () =>
+    set((s) => ({ messages: s.messages.filter((m) => m.type !== "status") })),
+
   setSseStatus: (sseStatus, retryAttempt) =>
     set({ sseStatus, sseRetryAttempt: retryAttempt ?? 0 }),
 
@@ -102,7 +106,7 @@ export const useAgentStore = create<AgentState>((set) => ({
     set((s) => ({
       sessionId: sid,
       messages: msgs || [],
-      status: "idle",
+      status: s.streamingSessionId === sid ? "streaming" : "idle",
       streamingText: "",
       toolCalls: [],
       sessionLoading: !msgs,

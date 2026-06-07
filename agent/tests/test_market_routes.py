@@ -45,6 +45,29 @@ def test_symbols_search_returns_results(monkeypatch):
     assert body["results"][0]["code"] == "688017"
 
 
+def test_market_kline_route(monkeypatch):
+    from src.api import market_kline
+
+    monkeypatch.setattr(
+        market_kline,
+        "fetch_kline",
+        lambda code, days=365: {
+            "code": "688017",
+            "name": "绿的谐波",
+            "bars": [{"time": "2025-06-01", "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}],
+            "source": "fake",
+            "stale": False,
+            "updatedAt": "2025-06-06 12:00:00",
+            "error": None,
+        },
+    )
+    response = _route_client().get("/market/kline", params={"code": "688017", "days": 90})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["code"] == "688017"
+    assert len(body["bars"]) == 1
+
+
 def test_holdings_parse_screenshot_route_returns_rows(monkeypatch):
     from src.api import holdings_parse
 

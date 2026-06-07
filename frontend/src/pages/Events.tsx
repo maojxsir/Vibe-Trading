@@ -9,7 +9,7 @@ import { eventsSeed, type EventDir, type MarketEvent } from "@/data/eventsSeed";
 import { useLiveQuotes } from "@/hooks/useLiveQuotes";
 import { loadPersisted, savePersisted, clearPersisted } from "@/lib/persist";
 import { changeColorClass, fmtPct } from "@/lib/cn-market";
-import { api } from "@/lib/api";
+import { launchAgentFromPage } from "@/lib/agent-launch";
 import { cn } from "@/lib/utils";
 
 const STORE = "events";
@@ -45,11 +45,15 @@ export function Events() {
         `3. 梳理传导路径：触发因素→传导逻辑→受益/受损板块→具体标的；\n` +
         `4. 指出方向（利好/利空）、弹性大小与需跟踪的信号；\n` +
         `5. 用中文，结构化输出。`;
-      const session = await api.createSession(`事件评估·${e.event}`.slice(0, 40));
-      await api.sendMessage(session.session_id, prompt);
-      navigate(`/agent?session=${session.session_id}`);
+      await launchAgentFromPage(
+        navigate,
+        `事件评估·${e.event}`.slice(0, 40),
+        prompt,
+        "收到，正在联网检索事件进展并评估传导路径…",
+      );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "无法启动 Agent 评估（需后端运行）");
+    } finally {
       setEvalIdx(null);
     }
   };

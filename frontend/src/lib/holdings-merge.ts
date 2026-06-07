@@ -1,4 +1,5 @@
 import type { Holding } from "@/data/holdingsSeed";
+import { isValidImportedHolding, isValidStockCode } from "@/lib/holdings-validators";
 
 export interface ImportedHolding {
   code: string;
@@ -15,7 +16,7 @@ export function mergeHoldings(existing: Holding[], imported: ImportedHolding[]):
 
   for (const row of imported) {
     const code = String(row.code || "").trim();
-    if (!code) continue;
+    if (!isValidImportedHolding({ code })) continue;
     const idx = out.findIndex((holding) => holding.code === code);
     if (idx >= 0) {
       const current = out[idx];
@@ -32,11 +33,11 @@ export function mergeHoldings(existing: Holding[], imported: ImportedHolding[]):
         cost: row.cost ?? 0,
         price: 0,
         position: row.position ?? 0,
-        action: "持有",
+        action: null,
         reason: "",
       });
     }
   }
 
-  return out;
+  return out.filter((holding) => isValidStockCode(holding.code));
 }

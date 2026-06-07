@@ -9,7 +9,7 @@ import { opportunitiesSeed, type Opportunity, type OppStatus } from "@/data/oppo
 import { useLiveQuotes } from "@/hooks/useLiveQuotes";
 import { loadPersisted, savePersisted, clearPersisted } from "@/lib/persist";
 import { changeColorClass, fmtPct, fmtPrice } from "@/lib/cn-market";
-import { api } from "@/lib/api";
+import { launchAgentFromPage } from "@/lib/agent-launch";
 import { cn } from "@/lib/utils";
 
 const STORE = "opportunities";
@@ -48,11 +48,15 @@ export function Opportunities() {
         `2. 评估「触发逻辑」是否成立、目标价是否合理；\n` +
         `3. 给出买入论证、关键风险、合理买点/区间与需跟踪的指标；\n` +
         `4. 用中文，结构化输出（要点或表格）。`;
-      const session = await api.createSession(`研究·${o.name}`);
-      await api.sendMessage(session.session_id, prompt);
-      navigate(`/agent?session=${session.session_id}`);
+      await launchAgentFromPage(
+        navigate,
+        `研究·${o.name}`,
+        prompt,
+        "收到，正在检索基本面并评估机会逻辑…",
+      );
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "无法启动 Agent 研究（需后端运行）");
+    } finally {
       setResearchingCode(null);
     }
   };

@@ -1,5 +1,5 @@
 import { memo, useState, useCallback } from "react";
-import { User, XCircle, RefreshCw, Copy, Check } from "lucide-react";
+import { User, XCircle, RefreshCw, Copy, Check, Loader2 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -58,6 +58,18 @@ export const MessageBubble = memo(function MessageBubble({ msg, onRetry }: Props
         </div>
         <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center shrink-0 mt-0.5">
           <User className="h-4 w-4 text-muted-foreground" />
+        </div>
+      </div>
+    );
+  }
+
+  if (msg.type === "status") {
+    return (
+      <div className="flex gap-3">
+        <AgentAvatar />
+        <div className="flex items-center gap-2 rounded-xl border border-primary/20 bg-primary/5 px-4 py-2.5 text-sm text-muted-foreground">
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-primary shrink-0" />
+          <span>{msg.content}</span>
         </div>
       </div>
     );

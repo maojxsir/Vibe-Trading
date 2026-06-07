@@ -89,6 +89,15 @@ export interface MarketQuotesWire {
   source: string;
   stale: boolean;
 }
+export interface MarketKlineWire {
+  code: string;
+  name: string | null;
+  bars: PriceBar[];
+  source: string;
+  stale: boolean;
+  updatedAt: string;
+  error?: string | null;
+}
 export interface SymbolSearchResultWire {
   code: string;
   name: string;
@@ -174,6 +183,8 @@ export const api = {
   getMarketOverview: () => request<MarketOverviewWire>("/market/overview"),
   getQuotes: (codes: string[]) =>
     request<MarketQuotesWire>(`/market/quotes?codes=${encodeURIComponent(codes.join(","))}`),
+  getKline: (code: string, days = 365) =>
+    request<MarketKlineWire>(`/market/kline?code=${encodeURIComponent(code)}&days=${days}`),
   searchSymbols: (q: string, boost: string[] = [], limit = 12) => {
     const params = new URLSearchParams();
     if (q) params.set("q", q);

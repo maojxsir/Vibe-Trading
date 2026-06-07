@@ -2,6 +2,7 @@ import { Flame } from "lucide-react";
 import { Badge } from "@/components/dashboard/Badge";
 import { DataTable, type Column } from "@/components/dashboard/DataTable";
 import { AlphaFactorBadge } from "@/components/dashboard/AlphaFactorBadge";
+import { StockSymbolButton } from "@/components/market/StockSymbolButton";
 import type { ModuleStock } from "@/data/types";
 import type { AlphaStockScore } from "@/hooks/useAlphaScores";
 import type { LiveQuote } from "@/hooks/useLiveQuotes";
@@ -28,10 +29,7 @@ export function ModuleStockTable({
       key: "name",
       header: "标的",
       render: (r) => (
-        <div>
-          <span className="font-medium text-foreground">{r.name}</span>
-          <span className="ml-1.5 text-xs text-muted-foreground">{r.code}</span>
-        </div>
+        <StockSymbolButton code={r.code} name={r.name} />
       ),
     },
     {

@@ -57,6 +57,7 @@ export function HoldingsImportModal({ open, rows, existingCodes, onCancel, onCon
                 <th className="px-2 py-2 text-left font-medium">名称</th>
                 <th className="px-2 py-2 text-left font-medium">代码</th>
                 <th className="px-2 py-2 text-right font-medium">成本</th>
+                <th className="px-2 py-2 text-right font-medium">持仓(股)</th>
                 <th className="px-2 py-2 text-right font-medium">仓位%</th>
                 <th className="px-2 py-2 text-left font-medium">操作</th>
                 <th className="px-2 py-2 text-left font-medium">置信度</th>
@@ -89,6 +90,16 @@ export function HoldingsImportModal({ open, rows, existingCodes, onCancel, onCon
                         type="number"
                         value={row.cost ?? ""}
                         onChange={(event) => patch(row.code, { cost: Number(event.target.value) })}
+                        className="w-24 rounded border bg-background px-2 py-1 text-right text-xs"
+                      />
+                    </td>
+                    <td className="px-2 py-2.5 text-right">
+                      <input
+                        type="number"
+                        value={row.shares ?? ""}
+                        onChange={(event) =>
+                          patch(row.code, { shares: event.target.value === "" ? null : Number(event.target.value) })
+                        }
                         className="w-24 rounded border bg-background px-2 py-1 text-right text-xs"
                       />
                     </td>

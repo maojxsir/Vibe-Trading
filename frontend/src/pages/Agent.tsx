@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { useAgentStore } from "@/stores/agent";
 import { useSSE } from "@/hooks/useSSE";
 import { ApiError, api, type GoalSnapshot, type MandateProposal, type MandateCommitted, type LiveAction, type LiveHalted, type LiveStatus } from "@/lib/api";
+import { appendAgentAck } from "@/lib/agent-launch";
 import { isReportWorthyRun } from "@/lib/runReports";
 import type { AgentMessage, ToolCallEntry } from "@/types/agent";
 import { AgentAvatar } from "@/components/chat/AgentAvatar";
@@ -38,6 +39,20 @@ function groupMessages(msgs: AgentMessage[]): MsgGroup[] {
 }
 
 const act = () => useAgentStore.getState();
+
+function finalizeTurnAnswer(preferredText = ""): void {
+  const store = act();
+  const text = (preferredText.trim() || store.streamingText.trim());
+  store.clearStreaming();
+  if (!text) return;
+  if (store.messages.some((m) => m.type === "answer" && m.content.trim() === text)) return;
+  store.addMessage({ id: "", type: "answer", content: text, timestamp: Date.now() });
+}
+
+function resetTurnStreamingState() {
+  act().clearStreaming();
+  useAgentStore.setState({ toolCalls: [] });
+}
 
 /** Poll cadence for the shared `GET /live/status` snapshot. */
 const LIVE_STATUS_POLL_INTERVAL_MS = 15_000;
@@ -213,6 +228,9 @@ export function Agent() {
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const lastEventRef = useRef(0);
   const sseTimeoutMsRef = useRef(90_000);
+  /** Dedup late/replayed attempt.completed events. */
+  const completedAttemptsRef = useRef<Set<string>>(new Set());
+  const activeAttemptRef = useRef<string | null>(null);
 
   /* tool_progress coalescing — keep latest payload per-tool, flush once per rAF. */
   const pendingProgressRef = useRef<Map<string, NonNullable<ToolCallEntry["progress"]>>>(new Map());
@@ -399,15 +417,37 @@ export function Agent() {
     if (sseSessionRef.current === sid) return;
     disconnect();
     sseSessionRef.current = sid;
+    completedAttemptsRef.current.clear();
+    activeAttemptRef.current = null;
+    let statusCleared = false;
+    const beginWork = () => {
+      if (statusCleared) return;
+      statusCleared = true;
+      act().clearStatusMessages();
+    };
 
     const touch = () => { lastEventRef.current = Date.now(); };
 
     connect(api.sseUrl(sid, { replay: "active" }), {
-      text_delta: (d) => { touch(); act().appendDelta(String(d.delta || "")); scrollToBottom(); },
+      "message.received": () => {
+        touch();
+        act().setStatus("streaming");
+        if (!act().messages.some((m) => m.type === "status")) {
+          appendAgentAck();
+        }
+      },
+
+      text_delta: (d) => {
+        touch();
+        beginWork();
+        act().appendDelta(String(d.delta || ""));
+        scrollToBottom();
+      },
       thinking_done: () => { touch(); /* don't flush — keep streaming text visible */ },
 
       tool_call: (d) => {
         touch();
+        beginWork();
         const toolName = String(d.tool || "");
         // Only update toolCalls tracker (no message creation during streaming)
         act().addToolCall({
@@ -470,23 +510,28 @@ export function Agent() {
 
       compact: () => { touch(); },
 
-      "attempt.created": () => {
+      "attempt.created": (d) => {
         touch();
-        // Backend has created a new attempt — ensure streaming state is active
-        // even if we connected mid-stream (SSE replay / page reload).
-        if (act().status !== "streaming") act().setStatus("streaming");
+        // Drop any leftover stream buffer from the previous turn.
+        resetTurnStreamingState();
+        statusCleared = false;
+        activeAttemptRef.current = String(d.attempt_id || "") || null;
+        act().setStatus("streaming");
       },
 
       "attempt.started": () => {
         touch();
-        // Backend has begun executing the attempt. Re-affirm streaming state
-        // so the UI shows a working indicator for reconnects and fresh loads.
         if (act().status !== "streaming") act().setStatus("streaming");
       },
 
       "attempt.completed": async (d) => {
         touch();
+        const attemptId = String(d.attempt_id || "");
+        if (attemptId && completedAttemptsRef.current.has(attemptId)) return;
+        if (attemptId) completedAttemptsRef.current.add(attemptId);
+
         const s = act();
+        s.clearStatusMessages();
         // Build ThinkingTimeline summary from accumulated toolCalls
         const completedTools = s.toolCalls;
         if (completedTools.length > 0) {
@@ -498,14 +543,28 @@ export function Agent() {
           }
         }
 
-        // Clear streaming text (don't create thinking message)
-        s.clearStreaming();
+        const summary = String(d.summary || "");
+        const summaryTrim = summary.trim();
 
-        // Add final answer
+        // Late completion from a previous attempt while a newer one is active — skip if already materialized.
+        if (
+          activeAttemptRef.current &&
+          attemptId &&
+          attemptId !== activeAttemptRef.current &&
+          summaryTrim &&
+          s.messages.some((m) => m.type === "answer" && m.content.trim() === summaryTrim)
+        ) {
+          s.clearStreaming();
+          s.setStatus("idle");
+          useAgentStore.setState({ toolCalls: [] });
+          scrollToBottom();
+          return;
+        }
+
+        finalizeTurnAnswer(summary);
+
         const runDir = String(d.run_dir || "");
         const runId = runDir ? runDir.split(/[/\\]/).pop() : undefined;
-        const summary = String(d.summary || "");
-        if (summary) s.addMessage({ id: "", type: "answer", content: summary, timestamp: Date.now() });
 
         // Detect Shadow Account id if render_shadow_report fired successfully this turn
         const shadowCall = completedTools.find(
@@ -513,6 +572,12 @@ export function Agent() {
         );
         const shadowMatch = shadowCall?.preview?.match(/"shadow_id"\s*:\s*"(shadow_[A-Za-z0-9_]+)"/);
         const shadowId = shadowMatch?.[1];
+
+        // Reset — unblock input before optional run-card fetch
+        s.setStatus("idle");
+        useAgentStore.setState({ toolCalls: [] });
+        activeAttemptRef.current = null;
+        scrollToBottom();
 
         // Show RunCompleteCard when the turn produced backtest metrics or a shadow report
         if (runId) {
@@ -542,14 +607,15 @@ export function Agent() {
           s.addMessage({ id: "", type: "run_complete", content: "", shadowId, timestamp: Date.now() });
         }
 
-        // Reset
-        s.setStatus("idle");
-        useAgentStore.setState({ toolCalls: [] });
         scrollToBottom();
       },
 
       "attempt.failed": (d) => {
         touch();
+        const attemptId = String(d.attempt_id || "");
+        if (attemptId) completedAttemptsRef.current.add(attemptId);
+        activeAttemptRef.current = null;
+        act().clearStatusMessages();
         act().clearStreaming();
         act().addMessage({ id: "", type: "error", content: String(d.error || "Execution failed"), timestamp: Date.now() });
         act().setStatus("idle");
@@ -737,7 +803,9 @@ export function Agent() {
     if (status !== "streaming") return;
     const timer = setInterval(() => {
       if (lastEventRef.current && Date.now() - lastEventRef.current > sseTimeoutMsRef.current && act().status === "streaming") {
+        finalizeTurnAnswer();
         act().setStatus("idle");
+        useAgentStore.setState({ toolCalls: [] });
         toast.warning("Execution timed out, automatically stopped");
       }
     }, 10_000);
@@ -759,6 +827,8 @@ export function Agent() {
         toast.success("Research goal attached");
         const kickoff = goalKickoffPrompt(prompt);
         act().addMessage({ id: "", type: "user", content: kickoff, timestamp: Date.now() });
+        appendAgentAck();
+        resetTurnStreamingState();
         act().setStatus("streaming");
         forceScrollToBottom();
         setupSSE(sid);
@@ -783,7 +853,9 @@ export function Agent() {
       setAttachment(null);
     }
     setInput("");
+    resetTurnStreamingState();
     act().addMessage({ id: "", type: "user", content: finalPrompt, timestamp: Date.now() });
+    appendAgentAck();
     act().setStatus("streaming");
     forceScrollToBottom();
     inputRef.current?.focus();
@@ -799,6 +871,7 @@ export function Agent() {
       setupSSE(sid);
       await api.sendMessage(sid, finalPrompt);
     } catch {
+      act().clearStatusMessages();
       act().setStatus("error");
       toast.error("Failed to send message, please retry.");
       act().addMessage({ id: "", type: "error", content: "Failed to send message, please retry.", timestamp: Date.now() });
@@ -1001,6 +1074,7 @@ export function Agent() {
   }, [showUploadMenu]);
 
   const groups = useMemo(() => groupMessages(messages), [messages]);
+  const hasStatusAck = messages.some((m) => m.type === "status");
   const goalProgress = useMemo(() => getGoalProgress(goalSnapshot), [goalSnapshot]);
 
   /* Merge message groups with live-channel items, ordered by timestamp, so a
@@ -1091,19 +1165,19 @@ export function Agent() {
             );
           })}
 
-          {/* Pre-stream placeholder: visible after Send, before first SSE event */}
-          {status === "streaming" && !streamingText && toolCalls.length === 0 && (
+          {/* Pre-stream placeholder when no ack bubble yet */}
+          {status === "streaming" && !streamingText && toolCalls.length === 0 && !hasStatusAck && (
             <div className="flex gap-3">
               <AgentAvatar />
               <div className="flex-1 min-w-0 flex items-center gap-2 text-xs text-muted-foreground pt-1">
                 <Loader2 className="h-3 w-3 animate-spin text-primary shrink-0" />
-                <span>Agent is working…</span>
+                <span>Agent 正在处理…</span>
               </div>
             </div>
           )}
 
-          {/* Live streaming area: text + tool status */}
-          {(streamingText || (status === "streaming" && toolCalls.length > 0)) && (
+          {/* Live streaming area: text + tool status (only while actively streaming) */}
+          {status === "streaming" && (streamingText || toolCalls.length > 0) && (
             <div className="flex gap-3">
               <AgentAvatar />
               <div className="flex-1 min-w-0 space-y-1.5">
@@ -1113,7 +1187,7 @@ export function Agent() {
                     <span className="inline-block w-0.5 h-4 bg-primary ml-0.5 animate-pulse align-middle" />
                   </div>
                 )}
-                {status === "streaming" && toolCalls.length > 0 && (
+                {toolCalls.length > 0 && (
                   <ToolProgressIndicator toolCalls={toolCalls} />
                 )}
               </div>
@@ -1126,7 +1200,7 @@ export function Agent() {
               <div className="h-0.5 flex-1 rounded-full bg-primary/20 overflow-hidden">
                 <div className="h-full w-1/3 bg-primary rounded-full animate-[pulse-slide_2s_ease-in-out_infinite]" />
               </div>
-              <span className="text-[10px] text-muted-foreground shrink-0 tabular-nums">running</span>
+              <span className="text-[10px] text-muted-foreground shrink-0 tabular-nums">处理中</span>
             </div>
           )}
 

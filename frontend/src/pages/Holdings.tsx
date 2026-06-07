@@ -7,28 +7,62 @@ import { Card } from "@/components/dashboard/Card";
 import { Badge } from "@/components/dashboard/Badge";
 import { StockSymbolCombobox } from "@/components/dashboard/StockSymbolCombobox";
 import { HoldingsImportModal } from "@/components/holdings/HoldingsImportModal";
-import { holdingsSeed, type DecisionAction, type Holding } from "@/data/holdingsSeed";
+import { StockSymbolButton } from "@/components/market/StockSymbolButton";
+import { StockChartDrawerProvider } from "@/contexts/StockChartDrawerContext";
+import {
+  type Holding,
+  decisionLabel,
+  decisionTone,
+  isLegacyDemoHoldings,
+} from "@/data/holdingsSeed";
 import { useLiveQuotes } from "@/hooks/useLiveQuotes";
 import { loadPersisted, savePersisted, clearPersisted } from "@/lib/persist";
 import { changeColorClass, fmtPct, fmtPrice } from "@/lib/cn-market";
-import { api, type HoldingImportRowWire } from "@/lib/api";
+import { api, type HoldingImportRowWire, ApiError } from "@/lib/api";
+import { launchAgentFromPage } from "@/lib/agent-launch";
 import { mergeHoldings } from "@/lib/holdings-merge";
+import { isValidImportedHolding, sanitizeHoldings } from "@/lib/holdings-validators";
 import { loadRecent, pushRecent } from "@/lib/recent-symbols";
 import { cn } from "@/lib/utils";
 
 const STORE = "holdings";
-const ACTIONS: DecisionAction[] = ["加仓", "减仓", "持有", "清仓"];
-const ACTION_TONE: Record<DecisionAction, "danger" | "success" | "neutral" | "warning"> = {
-  加仓: "danger",
-  减仓: "success",
-  持有: "neutral",
-  清仓: "warning",
-};
-const SEED_BOOST_CODES = ["688017", "002472", "601689", "002050", "300124", "003021", "300308", "002463", "300476", "300394"];
+
+function loadInitialHoldings(): Holding[] {
+  const saved = sanitizeHoldings(loadPersisted<Holding[]>(STORE, []));
+  if (isLegacyDemoHoldings(saved)) {
+    clearPersisted(STORE);
+    return [];
+  }
+  return saved;
+}
+
+function holdingsImportErrorMessage(error: unknown): string {
+  if (!(error instanceof ApiError)) {
+    return error instanceof Error ? error.message : "截图解析失败";
+  }
+  const code = error.message.split(":", 1)[0];
+  switch (code) {
+    case "ocr_empty":
+      return "未能从截图识别到持仓文字，请使用同花顺/东财/券商 App 的持仓页截图，并尽量裁掉无关区域";
+    case "ocr_failed":
+      return error.message.includes("rapidocr_not_installed")
+        ? "OCR 组件未安装：在项目根目录执行 pip install rapidocr-onnxruntime 后重启后端"
+        : "OCR 识别失败，请换一张更清晰的截图重试";
+    case "unsupported_image_type":
+      return "仅支持 PNG / JPEG / WebP 截图";
+    case "file_too_large":
+      return "图片过大（上限 8MB），请压缩或裁剪后重试";
+    case "parse_failed":
+    case "no_holdings_found":
+      return "已识别文字但未解析出持仓，请确认截图包含股票代码、名称、成本或仓位";
+    default:
+      return error.message || "截图解析失败";
+  }
+}
 
 export function Holdings() {
   const navigate = useNavigate();
-  const [rows, setRows] = useState<Holding[]>(() => loadPersisted(STORE, holdingsSeed));
+  const [rows, setRows] = useState<Holding[]>(loadInitialHoldings);
   const [editing, setEditing] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -37,11 +71,11 @@ export function Holdings() {
   const [recentCodes, setRecentCodes] = useState<string[]>(() => loadRecent());
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  useEffect(() => savePersisted(STORE, rows), [rows]);
+  useEffect(() => savePersisted(STORE, sanitizeHoldings(rows)), [rows]);
 
   const codes = useMemo(() => rows.map((r) => r.code), [rows]);
   const boostCodes = useMemo(
-    () => Array.from(new Set([...recentCodes, ...rows.map((r) => r.code), ...SEED_BOOST_CODES])),
+    () => Array.from(new Set([...recentCodes, ...rows.map((r) => r.code)])),
     [recentCodes, rows],
   );
   const { quotes, stale, updatedAt, loading, refresh } = useLiveQuotes(codes);
@@ -57,7 +91,7 @@ export function Holdings() {
         .map((h, i) => {
           const price = priceOf(h);
           const pnl = h.cost ? ((price - h.cost) / h.cost) * 100 : 0;
-          return `${i + 1}. ${h.name}(${h.code}) 成本${fmtPrice(h.cost)} 现价${fmtPrice(price)} 盈亏${fmtPct(pnl)} 仓位${h.position}% 当前决策:${h.action} 理由:${h.reason || "—"}`;
+          return `${i + 1}. ${h.name}(${h.code}) 成本${fmtPrice(h.cost)} 现价${fmtPrice(price)} 盈亏${fmtPct(pnl)} 仓位${h.position}% 当前决策:${decisionLabel(h.action)} 理由:${h.reason || "—"}`;
         })
         .join("\n");
       const prompt =
@@ -67,36 +101,45 @@ export function Holdings() {
         `3. 如有需要可调用回测、行情或检索工具佐证；\n` +
         `4. 最后给出每只标的明确的加/减/持建议，以及组合层面的调整建议。\n` +
         `请用中文，分标的、用要点或表格输出。`;
-      const session = await api.createSession("持仓复盘");
-      await api.sendMessage(session.session_id, prompt);
-      navigate(`/agent?session=${session.session_id}`);
+      await launchAgentFromPage(
+        navigate,
+        "持仓复盘",
+        prompt,
+        "收到，已开始复盘您的持仓组合，正在调取行情与分析工具…",
+      );
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "无法启动 Agent 复盘（需后端运行）");
+    } finally {
       setReviewing(false);
     }
   };
   const update = (i: number, patch: Partial<Holding>) =>
     setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
   const addRow = () =>
-    setRows((rs) => [...rs, { name: "新标的", code: "000000", cost: 0, price: 0, position: 0, action: "持有", reason: "" }]);
+    setRows((rs) => [...rs, { name: "新标的", code: "000000", cost: 0, price: 0, position: 0, action: null, reason: "" }]);
   const removeRow = (i: number) => setRows((rs) => rs.filter((_, idx) => idx !== i));
-  const reset = () => {
+  const clearAll = () => {
     clearPersisted(STORE);
-    setRows(holdingsSeed);
+    setRows([]);
   };
 
   const handleImportFile = useCallback(
     async (file: File) => {
       setImporting(true);
       try {
-        const wire = await api.parseHoldingsScreenshot(file, rows.map((row) => row.code));
-        setImportRows(wire.rows);
+        const wire = await api.parseHoldingsScreenshot(file, sanitizeHoldings(rows).map((row) => row.code));
+        const parsed = wire.rows.filter((row) => isValidImportedHolding(row));
+        if (parsed.length === 0) {
+          toast.error("未解析出有效持仓（仅排除代码 000000 等占位行，成本/仓位为 0 可保留）");
+          return;
+        }
+        setImportRows(parsed);
         setImportOpen(true);
         if (wire.meta.warnings?.length) {
           toast.warning(`导入提示: ${wire.meta.warnings.join(", ")}`);
         }
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "截图解析失败");
+        toast.error(holdingsImportErrorMessage(error));
       } finally {
         setImporting(false);
       }
@@ -120,25 +163,38 @@ export function Holdings() {
   }, [editing, handleImportFile]);
 
   const confirmImport = (selected: HoldingImportRowWire[]) => {
-    setRows((current) => mergeHoldings(current, selected));
-    selected.forEach((row) => pushRecent(row.code));
+    const valid = selected.filter((row) => isValidImportedHolding(row));
+    if (valid.length === 0) {
+      toast.error("没有可导入的有效持仓（仅排除代码 000000 等占位行）");
+      return;
+    }
+    setRows((current) => sanitizeHoldings(mergeHoldings(current, valid)));
+    valid.forEach((row) => pushRecent(row.code));
     setRecentCodes(loadRecent());
     setImportOpen(false);
     setImportRows([]);
-    toast.success(`已导入 ${selected.length} 条持仓`);
+    toast.success(`已导入 ${valid.length} 条持仓`);
+  };
+
+  const toggleEditing = () => {
+    setEditing((current) => {
+      if (current) setRows((rs) => sanitizeHoldings(rs));
+      return !current;
+    });
   };
 
   return (
+    <StockChartDrawerProvider>
     <div className="mx-auto max-w-7xl p-6">
       <PageHeader
         title="持仓决策"
-        subtitle="当前持仓与加/减/持决策建议（现价实时刷新, 盈亏实时计算）"
+        subtitle="维护真实持仓（导入或手动编辑）；加/减/持建议由 Agent 复盘后写入，不可手动修改"
         actions={
           <div className="flex items-center gap-2">
             <button onClick={refresh} className="inline-flex items-center gap-1.5 rounded-md border bg-card px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground">
               <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} /> 刷新
             </button>
-            <button onClick={() => setEditing((e) => !e)} className={cn("inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm", editing ? "border-primary bg-primary/10 text-primary" : "bg-card text-muted-foreground hover:text-foreground")}>
+            <button onClick={toggleEditing} className={cn("inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm", editing ? "border-primary bg-primary/10 text-primary" : "bg-card text-muted-foreground hover:text-foreground")}>
               <Pencil className="h-4 w-4" /> {editing ? "完成" : "编辑"}
             </button>
             {editing && (
@@ -164,7 +220,7 @@ export function Holdings() {
                 />
               </>
             )}
-            <button onClick={reviewWithAgent} disabled={reviewing} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-60">
+            <button onClick={reviewWithAgent} disabled={reviewing || rows.length === 0} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-60">
               {reviewing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />}
               {reviewing ? "启动中…" : "用 Agent 复盘"}
             </button>
@@ -173,6 +229,34 @@ export function Holdings() {
       />
 
       <Card className="mb-4">
+        {rows.length === 0 ? (
+          <div className="px-6 py-12 text-center">
+            <p className="text-sm text-muted-foreground">暂无持仓数据</p>
+            <p className="mt-1 text-xs text-muted-foreground/80">添加持仓，或从券商 App 截图导入</p>
+            {!editing ? (
+              <button
+                onClick={() => setEditing(true)}
+                className="mt-4 inline-flex items-center gap-1.5 rounded-md border bg-card px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground"
+              >
+                <Pencil className="h-4 w-4" /> 开始录入持仓
+              </button>
+            ) : (
+              <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                <button onClick={addRow} className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground">
+                  <Plus className="h-4 w-4" /> 添加持仓
+                </button>
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={importing}
+                  className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground disabled:opacity-60"
+                >
+                  {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />}
+                  从截图导入
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -204,7 +288,7 @@ export function Holdings() {
                           }}
                         />
                       ) : (
-                        <span><span className="font-medium text-foreground">{h.name}</span> <span className="ml-1 text-xs text-muted-foreground">{h.code}</span></span>
+                        <StockSymbolButton code={h.code} name={h.name} />
                       )}
                     </td>
                     <td className="px-3 py-2.5 text-right tabular-nums">
@@ -220,11 +304,9 @@ export function Holdings() {
                       ) : `${h.position}%`}
                     </td>
                     <td className="px-3 py-2.5">
-                      {editing ? (
-                        <select value={h.action} onChange={(e) => update(i, { action: e.target.value as DecisionAction })} className="rounded border bg-background px-1.5 py-1 text-xs">
-                          {ACTIONS.map((a) => <option key={a} value={a}>{a}</option>)}
-                        </select>
-                      ) : <Badge tone={ACTION_TONE[h.action]}>{h.action}</Badge>}
+                      <Badge tone={decisionTone(h.action)} className={!h.action ? "opacity-70" : undefined}>
+                        {decisionLabel(h.action)}
+                      </Badge>
                     </td>
                     {editing && (
                       <td className="px-3 py-2.5 text-right">
@@ -237,27 +319,32 @@ export function Holdings() {
             </tbody>
           </table>
         </div>
-        {editing && (
-          <div className="mt-3 flex flex-wrap items-center gap-2">
+        )}
+        {editing && rows.length > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-2 px-3 pb-3">
             <button onClick={addRow} className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:text-foreground"><Plus className="h-3 w-3" /> 添加持仓</button>
-            <button onClick={reset} className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:text-foreground"><RotateCcw className="h-3 w-3" /> 重置为示例</button>
+            <button onClick={clearAll} className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:text-foreground"><RotateCcw className="h-3 w-3" /> 清空持仓</button>
             <span className="text-xs text-muted-foreground">截图可能包含账户信息；仅发送到本地后端解析，不会保存图片。</span>
           </div>
         )}
       </Card>
 
+      {rows.length > 0 && (
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
         {rows.map((h, i) => (
-          <Card key={i} title={<span>{h.name} <span className="text-xs text-muted-foreground">{h.code}</span></span>}>
-            <div className="mb-2"><Badge tone={ACTION_TONE[h.action]}>{h.action}</Badge></div>
-            {editing ? (
-              <textarea value={h.reason} onChange={(e) => update(i, { reason: e.target.value })} rows={3} className="w-full rounded border bg-background px-2 py-1 text-sm" />
-            ) : (
-              <p className="text-sm leading-relaxed text-muted-foreground">{h.reason}</p>
-            )}
+          <Card key={i} title={<StockSymbolButton code={h.code} name={h.name} layout="inline" className="text-base" />}>
+            <div className="mb-2">
+              <Badge tone={decisionTone(h.action)} className={!h.action ? "opacity-70" : undefined}>
+                {decisionLabel(h.action)}
+              </Badge>
+            </div>
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              {h.reason || "暂无 Agent 建议，点击「用 Agent 复盘」获取加/减/持理由。"}
+            </p>
           </Card>
         ))}
       </div>
+      )}
 
       <p className="mt-4 text-xs text-muted-foreground">
         现价更新: {updatedAt || "—"}
@@ -272,5 +359,6 @@ export function Holdings() {
         onConfirm={confirmImport}
       />
     </div>
+    </StockChartDrawerProvider>
   );
 }
