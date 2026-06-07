@@ -1,12 +1,12 @@
 // China A-share market display helpers.
 //
-// IMPORTANT: A-share convention is the opposite of the repo default and of
-// Western markets: red = up/positive, green = down/negative. All CN-market
-// pages funnel their colour decisions through here so the convention stays
-// consistent in one place.
+// Up/down colors follow the user-configurable market color scheme (Settings).
+// Default auto mode uses CN convention when the browser locale is Chinese.
+
+import { changeColorClassForChange } from "./market-color-scheme";
 
 export function changeColorClass(change: number): string {
-  return change >= 0 ? "text-danger" : "text-success";
+  return changeColorClassForChange(change);
 }
 
 export function fmtPct(pct: number): string {

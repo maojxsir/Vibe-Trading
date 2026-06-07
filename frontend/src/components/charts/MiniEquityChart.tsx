@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { echarts } from "@/lib/echarts";
 import { getChartTheme } from "@/lib/chart-theme";
 import { useDarkMode } from "@/hooks/useDarkMode";
+import { useMarketColorScheme } from "@/contexts/MarketColorSchemeContext";
 
 interface Props {
   data: Array<{ time: string; equity: number | string }>;
@@ -11,6 +12,7 @@ interface Props {
 export function MiniEquityChart({ data, height = 80 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const { dark } = useDarkMode();
+  const { scheme: colorScheme } = useMarketColorScheme();
 
   useEffect(() => {
     if (!ref.current || data.length < 2) return;
@@ -40,7 +42,7 @@ export function MiniEquityChart({ data, height = 80 }: Props) {
     const ro = new ResizeObserver(() => chart.resize());
     ro.observe(ref.current);
     return () => { ro.disconnect(); chart.dispose(); };
-  }, [data, dark]);
+  }, [data, dark, colorScheme]);
 
   if (data.length < 2) return null;
   return <div ref={ref} style={{ height }} className="rounded-lg overflow-hidden" />;

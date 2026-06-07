@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { Database, KeyRound, Loader2, RotateCcw, Save, Server, SlidersHorizontal } from "lucide-react";
+import { Database, KeyRound, Loader2, Palette, RotateCcw, Save, Server, SlidersHorizontal } from "lucide-react";
 import { toast } from "sonner";
+import { useMarketColorScheme } from "@/contexts/MarketColorSchemeContext";
+import { MARKET_COLOR_SCHEME_OPTIONS } from "@/lib/market-color-scheme";
 import { api, isAuthRequiredError, type DataSourceSettings, type LLMProviderOption, type LLMSettings } from "@/lib/api";
 import { getApiAuthKey, setApiAuthKey } from "@/lib/apiAuth";
 
@@ -32,6 +34,7 @@ function toForm(settings: LLMSettings): LLMFormState {
 }
 
 export function Settings() {
+  const { scheme: colorScheme, setScheme: setColorScheme } = useMarketColorScheme();
   const [settings, setSettings] = useState<LLMSettings | null>(null);
   const [dataSettings, setDataSettings] = useState<DataSourceSettings | null>(null);
   const [form, setForm] = useState<LLMFormState | null>(null);
@@ -180,6 +183,47 @@ export function Settings() {
     </form>
   );
 
+  const displaySection = (
+    <section className="rounded-lg border bg-card p-5 shadow-sm">
+      <div className="mb-4 space-y-1">
+        <div className="flex items-center gap-2">
+          <Palette className="h-4 w-4 text-primary" />
+          <h2 className="text-base font-semibold">{"Display"}</h2>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          {"Choose how up/down moves are colored in K-line charts and quote tables. Saved in this browser only."}
+        </p>
+      </div>
+
+      <div className="grid gap-3">
+        {MARKET_COLOR_SCHEME_OPTIONS.map((option) => (
+          <label
+            key={option.value}
+            className={`flex cursor-pointer gap-3 rounded-md border px-3 py-3 transition ${
+              colorScheme === option.value ? "border-primary bg-primary/5" : "hover:bg-muted/30"
+            }`}
+          >
+            <input
+              type="radio"
+              name="market-color-scheme"
+              value={option.value}
+              checked={colorScheme === option.value}
+              onChange={() => {
+                setColorScheme(option.value);
+                toast.success("Market color scheme updated");
+              }}
+              className="mt-1 h-4 w-4 accent-primary"
+            />
+            <span className="grid gap-1">
+              <span className="text-sm font-medium">{option.label}</span>
+              <span className={hintClass}>{option.description}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+    </section>
+  );
+
   if (loading || !form || !settings || !dataSettings) {
     return (
       <div className="mx-auto max-w-5xl space-y-6 p-6">
@@ -188,6 +232,7 @@ export function Settings() {
           <p className="max-w-3xl text-sm text-muted-foreground">{"Configure model credentials and market data source tokens for this local project."}</p>
         </div>
         {localApiAccessSection}
+        {displaySection}
         <div className="flex min-h-32 items-center justify-center rounded-lg border bg-card p-5 text-sm text-muted-foreground">
           {settingsLoadError ? (
             <div className="text-center">
@@ -225,6 +270,8 @@ export function Settings() {
       </div>
 
       {localApiAccessSection}
+
+      {displaySection}
 
       <div className="space-y-2">
         <h2 className="text-lg font-semibold tracking-tight">{"LLM Settings"}</h2>

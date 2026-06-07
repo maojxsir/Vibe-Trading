@@ -4,6 +4,7 @@ import { getChartTheme } from "@/lib/chart-theme";
 import { abbreviateNum } from "@/lib/formatters";
 import { echarts, CHART_GROUP, connectCharts } from "@/lib/echarts";
 import { useDarkMode } from "@/hooks/useDarkMode";
+import { useMarketColorScheme } from "@/contexts/MarketColorSchemeContext";
 
 interface Props {
   data: EquityPoint[];
@@ -13,6 +14,7 @@ interface Props {
 export function EquityChart({ data, height = 300 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const { dark } = useDarkMode();
+  const { scheme: colorScheme } = useMarketColorScheme();
 
   useEffect(() => {
     if (!ref.current || data.length === 0) return;
@@ -103,7 +105,7 @@ export function EquityChart({ data, height = 300 }: Props) {
     const ro = new ResizeObserver(() => chart.resize());
     ro.observe(ref.current!);
     return () => { ro.disconnect(); chart.dispose(); };
-  }, [data, dark]);
+  }, [data, dark, colorScheme]);
 
   if (data.length === 0) {
     return <div className="text-muted-foreground text-sm p-4">No equity data</div>;

@@ -5,6 +5,7 @@ import { api, type RunListItem, type RunData, type EquityPoint } from "@/lib/api
 import { echarts, CHART_GROUP, connectCharts } from "@/lib/echarts";
 import { getChartTheme } from "@/lib/chart-theme";
 import { useDarkMode } from "@/hooks/useDarkMode";
+import { useMarketColorScheme } from "@/contexts/MarketColorSchemeContext";
 import { SkeletonChart, SkeletonMetrics } from "@/components/common/Skeleton";
 
 interface MetricDef {
@@ -100,6 +101,7 @@ interface EquityChartOverlayProps {
 function EquityChartOverlay({ leftCurve, rightCurve, leftLabel, rightLabel }: EquityChartOverlayProps) {
   const ref = useRef<HTMLDivElement>(null);
   const { dark } = useDarkMode();
+  const { scheme: colorScheme } = useMarketColorScheme();
 
   useEffect(() => {
     if (!ref.current) return;
@@ -189,7 +191,7 @@ function EquityChartOverlay({ leftCurve, rightCurve, leftLabel, rightLabel }: Eq
     const ro = new ResizeObserver(() => chart.resize());
     ro.observe(ref.current!);
     return () => { ro.disconnect(); chart.dispose(); };
-  }, [leftCurve, rightCurve, leftLabel, rightLabel, dark]);
+  }, [leftCurve, rightCurve, leftLabel, rightLabel, dark, colorScheme]);
 
   if (leftCurve.length === 0 && rightCurve.length === 0) return null;
 

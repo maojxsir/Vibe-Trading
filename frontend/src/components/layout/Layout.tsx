@@ -3,6 +3,7 @@ import { Link, Outlet, useLocation, useSearchParams } from "react-router-dom";
 import { BarChart3, Bot, Moon, Sun, Plus, Trash2, Pencil, MessageSquare, ChevronsLeft, ChevronsRight, Settings, Layers, Loader2, LayoutDashboard, ClipboardList, ListChecks, Share2, Cpu, Zap, Compass, Activity, Newspaper, Grid3x3 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDarkMode } from "@/hooks/useDarkMode";
+import { MarketColorSchemeProvider } from "@/contexts/MarketColorSchemeContext";
 import { api, type SessionItem } from "@/lib/api";
 import { useAgentStore } from "@/stores/agent";
 import { ConnectionBanner } from "@/components/layout/ConnectionBanner";
@@ -77,6 +78,7 @@ export function Layout() {
   };
 
   return (
+    <MarketColorSchemeProvider>
     <div className="flex h-screen bg-background">
       {/* Sidebar */}
       <aside className={cn(
@@ -259,5 +261,6 @@ export function Layout() {
         </main>
       </div>
     </div>
+    </MarketColorSchemeProvider>
   );
 }

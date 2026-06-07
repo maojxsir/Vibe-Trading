@@ -1,0 +1,23 @@
+# Personal / single-user deployment (e.g. Aliyun ECS).
+# - Binds a non-default host port (52889) to the app (8899 inside the container).
+# - No loopback trust: set API_AUTH_KEY in agent/.env before exposing the port.
+# - Frontend is baked into the image; one URL serves UI + API.
+#
+#   docker compose -f docker-compose.prod.yml up --build -d
+#   open http://<server-ip>:52889
+
+services:
+  vibe-trading:
+    build: .
+    ports:
+      - "52889:8899"
+    env_file:
+      - agent/.env
+    volumes:
+      - vibe-runs:/app/agent/runs
+      - vibe-sessions:/app/agent/sessions
+    restart: unless-stopped
+
+volumes:
+  vibe-runs:
+  vibe-sessions:

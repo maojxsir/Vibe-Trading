@@ -47,7 +47,19 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     throw await errorFromResponse(res);
   }
   const text = await res.text();
-  return text ? JSON.parse(text) : ({} as T);
+  if (!text) return {} as T;
+  const contentType = res.headers.get("content-type") ?? "";
+  if (contentType.includes("text/html") || text.trimStart().startsWith("<!")) {
+    throw new ApiError(
+      "接口返回了 HTML 页面而非 JSON。若刚更新代码，请重启后端 agent 服务后再试。",
+      res.status,
+    );
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new ApiError(`响应不是有效 JSON：${text.slice(0, 120)}`, res.status);
+  }
 }
 
 export interface UploadResult {

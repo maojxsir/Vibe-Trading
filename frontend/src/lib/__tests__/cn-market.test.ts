@@ -1,7 +1,13 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { changeColorClass, fmtPct, fmtPrice, fmtMarketCap, toTencentCode } from "@/lib/cn-market";
+import { setMarketColorScheme } from "@/lib/market-color-scheme";
 
 describe("cn-market", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    setMarketColorScheme("cn");
+  });
+
   it("红涨绿跌: >=0 红, <0 绿", () => {
     expect(changeColorClass(2.9)).toBe("text-danger");
     expect(changeColorClass(0)).toBe("text-danger");

@@ -1,3 +1,5 @@
+import { getMarketColorScheme, isCnColorScheme } from "./market-color-scheme";
+
 function css(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
@@ -15,15 +17,16 @@ function hslToHex(hsl: string): string {
   return `#${f(0)}${f(8)}${f(4)}`;
 }
 
-function isChinese(): boolean {
-  return (document.documentElement.lang || navigator.language || "").startsWith("zh");
-}
-
 let _cache: ReturnType<typeof buildTheme> | null = null;
 let _cacheKey = "";
 
+export function invalidateChartThemeCache(): void {
+  _cache = null;
+  _cacheKey = "";
+}
+
 function buildTheme() {
-  const cn = isChinese();
+  const cn = isCnColorScheme();
   const isDark = document.documentElement.classList.contains("dark");
 
   const successHex = hslToHex(css("--success")) || "#22c55e";
@@ -57,7 +60,7 @@ function buildTheme() {
 }
 
 export function getChartTheme() {
-  const key = `${document.documentElement.className}|${document.documentElement.lang || navigator.language}`;
+  const key = `${document.documentElement.className}|${getMarketColorScheme()}|${document.documentElement.lang || navigator.language}`;
   if (_cache && _cacheKey === key) return _cache;
   _cache = buildTheme();
   _cacheKey = key;

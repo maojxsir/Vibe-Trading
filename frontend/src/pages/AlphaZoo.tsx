@@ -38,6 +38,7 @@ import {
 import { echarts } from "@/lib/echarts";
 import { getChartTheme } from "@/lib/chart-theme";
 import { useDarkMode } from "@/hooks/useDarkMode";
+import { useMarketColorScheme } from "@/contexts/MarketColorSchemeContext";
 
 /* ---------- Constants ---------- */
 
@@ -868,6 +869,7 @@ function ProgressPanel({
 
 function ResultPanel({ result }: { result: AlphaBenchResult }) {
   const { dark } = useDarkMode();
+  const { scheme: colorScheme } = useMarketColorScheme();
   const chartRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -913,7 +915,7 @@ function ResultPanel({ result }: { result: AlphaBenchResult }) {
       ro.disconnect();
       chart.dispose();
     };
-  }, [result, dark]);
+  }, [result, dark, colorScheme]);
 
   const totals = [
     { label: "Alive", value: result.alive, icon: CheckCircle2, tone: "text-green-600 dark:text-green-400" },
