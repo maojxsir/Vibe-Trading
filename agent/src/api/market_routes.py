@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Dict, List
+from typing import Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Security, UploadFile, status
+from fastapi.responses import JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
 from src.api import holdings_parse, symbol_index
@@ -21,6 +23,17 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/market", tags=["market"])
 holdings_router = APIRouter(prefix="/holdings", tags=["holdings"])
+_screener_security = HTTPBearer(auto_error=False)
+
+
+async def _require_screener_refresh_auth(
+    request: Request,
+    cred: Optional[HTTPAuthorizationCredentials] = Security(_screener_security),
+) -> None:
+    """Lazy-import auth to avoid circular imports with api_server."""
+    from api_server import require_auth
+
+    await require_auth(request, cred)
 
 
 class GenerateChainRequest(BaseModel):
@@ -144,6 +157,35 @@ async def holdings_parse_screenshot(
             if isinstance(row, dict):
                 row["action"] = "update" if str(row.get("code") or "") in existing else "append"
     return {"status": "ok", "rows": rows, "meta": parsed.get("meta", {})}
+
+
+@router.get("/screener")
+async def market_screener(date: str = Query("")) -> Dict[str, object]:
+    """Return persisted limit-up screener results; ``stale`` when empty."""
+    import asyncio
+
+    from src.api.screener_service import get_screener_payload
+
+    return await asyncio.to_thread(get_screener_payload, date)
+
+
+@router.post("/screener/refresh", dependencies=[Depends(_require_screener_refresh_auth)])
+async def market_screener_refresh() -> JSONResponse:
+    """Kick off a background screener scan (auth required)."""
+    from src.api.screener_service import trigger_refresh
+
+    status_code, body = trigger_refresh()
+    return JSONResponse(status_code=status_code, content=body)
+
+
+@router.get("/screener/status")
+async def market_screener_status() -> Dict[str, object]:
+    """Return screener scan progress for the Web UI."""
+    import asyncio
+
+    from src.api.screener_service import get_status
+
+    return await asyncio.to_thread(get_status)
 
 
 @router.get("/news")

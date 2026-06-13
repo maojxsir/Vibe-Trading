@@ -22,14 +22,41 @@ LABEL org.opencontainers.image.title="Vibe-Trading" \
 
 WORKDIR /app
 
-# System deps
+# PyPI: default Aliyun mirror for CN ECS builds; override for other regions:
+#   docker build --build-arg PIP_INDEX_URL=https://pypi.org/simple/ .
+ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ENV PIP_INDEX_URL=${PIP_INDEX_URL} \
+    PIP_TRUSTED_HOST=mirrors.aliyun.com \
+    PIP_DEFAULT_TIMEOUT=300
+
+# Runtime system libraries for native Python wheels (slim image has almost none).
+# Grouped by feature — keep in sync when adding deps that call into C libraries.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    # rapidocr-onnxruntime → opencv-python → headless GUI libs
+    libglib2.0-0 \
+    libgl1 \
+    libxcb1 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
+    libgomp1 \
+    # weasyprint → shadow-account PDF reports
+    libcairo2 \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libgdk-pixbuf-2.0-0 \
+    shared-mime-info \
+    fontconfig \
+    fonts-noto-cjk \
+    # matplotlib / pillow
+    libfreetype6 \
     && rm -rf /var/lib/apt/lists/*
 
 # Python deps (install before copying code for layer caching)
 COPY agent/requirements.txt agent/requirements.txt
-RUN pip install --no-cache-dir -r agent/requirements.txt
+RUN pip install --no-cache-dir --default-timeout=300 --retries 10 \
+    -r agent/requirements.txt
 
 # Copy project
 COPY pyproject.toml LICENSE README.md ./
@@ -39,7 +66,7 @@ COPY agent/ agent/
 COPY --from=frontend-build /app/frontend/dist frontend/dist
 
 # Install CLI entrypoint
-RUN pip install --no-cache-dir -e .
+RUN pip install --no-cache-dir --default-timeout=300 --retries 10 -e .
 
 # Runtime should not run as root. Keep writable app data directories owned by
 # the service user so named Docker volumes inherit usable permissions.

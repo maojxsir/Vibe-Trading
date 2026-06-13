@@ -49,14 +49,16 @@ def _rows_from_records(records: Iterable[Mapping[str, object]]) -> list[dict[str
         if not ts_code:
             suffix = "SH" if code.startswith(("6", "9")) else "SZ"
             ts_code = f"{code}.{suffix}"
-        rows.append(
-            {
-                "code": code,
-                "name": name,
-                "ts_code": ts_code,
-                "cnspell": str(record.get("cnspell") or "").strip().upper(),
-            }
-        )
+        row: dict[str, str] = {
+            "code": code,
+            "name": name,
+            "ts_code": ts_code,
+            "cnspell": str(record.get("cnspell") or "").strip().upper(),
+        }
+        list_date = str(record.get("list_date") or "").strip()
+        if list_date:
+            row["list_date"] = list_date
+        rows.append(row)
         seen.add(code)
     return rows
 
@@ -98,7 +100,10 @@ def load_index(force: bool = False) -> list[dict[str, str]]:
         import tushare as ts  # type: ignore
 
         pro = ts.pro_api(token)
-        df = pro.stock_basic(list_status="L", fields="ts_code,symbol,name,cnspell")
+        df = pro.stock_basic(
+            list_status="L",
+            fields="ts_code,symbol,name,cnspell,list_date",
+        )
         rows = _rows_from_records(df.to_dict("records"))
         if not rows:
             raise RuntimeError("empty Tushare stock_basic response")

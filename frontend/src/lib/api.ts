@@ -1,4 +1,5 @@
 import { authHeaders, withAuthQuery } from "@/lib/apiAuth";
+import type { ScreenerPayload, ScreenerRefreshResponse, ScreenerStatus } from "@/types/screener";
 
 const BASE = "";
 
@@ -220,6 +221,25 @@ export const api = {
     }
     return res.json() as Promise<HoldingsParseWire>;
   },
+  getScreener: (date = "") => {
+    const qs = date ? `?date=${encodeURIComponent(date)}` : "";
+    return request<ScreenerPayload>(`/market/screener${qs}`);
+  },
+  refreshScreener: async (): Promise<ScreenerRefreshResponse> => {
+    const res = await fetch(`${BASE}/market/screener/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+    });
+    if (res.status === 409) {
+      const body = (await res.json().catch(() => ({}))) as ScreenerRefreshResponse;
+      return { accepted: false, message: body.message ?? "scan already running" };
+    }
+    if (!res.ok) {
+      throw await errorFromResponse(res);
+    }
+    return res.json() as Promise<ScreenerRefreshResponse>;
+  },
+  getScreenerStatus: () => request<ScreenerStatus>("/market/screener/status"),
   getNews: () => request<MarketNewsWire>("/market/news"),
   getComNews: (limit = 80) => request<MarketNewsWire>(`/com/news?limit=${limit}`),
   generateLogicChain: (topic: string) =>

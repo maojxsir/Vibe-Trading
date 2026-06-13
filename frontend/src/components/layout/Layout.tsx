@@ -1,6 +1,6 @@
 ﻿import { useEffect, useState } from "react";
 import { Link, Outlet, useLocation, useSearchParams } from "react-router-dom";
-import { BarChart3, Bot, Moon, Sun, Plus, Trash2, Pencil, MessageSquare, ChevronsLeft, ChevronsRight, Settings, Layers, Loader2, LayoutDashboard, ClipboardList, ListChecks, Share2, Cpu, Zap, Compass, Activity, Newspaper, Grid3x3 } from "lucide-react";
+import { BarChart3, Bot, Moon, Sun, Plus, Trash2, Pencil, MessageSquare, ChevronsLeft, ChevronsRight, Settings, Layers, Loader2, LayoutDashboard, ClipboardList, ListChecks, Share2, Cpu, Zap, Compass, Activity, Newspaper, Grid3x3, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDarkMode } from "@/hooks/useDarkMode";
 import { MarketColorSchemeProvider } from "@/contexts/MarketColorSchemeContext";
@@ -15,6 +15,7 @@ const NAV = [
   { to: "/", icon: LayoutDashboard, label: "Home" },
   { to: "/holdings", icon: ClipboardList, label: "持仓决策" },
   { to: "/opportunities", icon: ListChecks, label: "机会清单" },
+  { to: "/screener", icon: TrendingUp, label: "打板扫描" },
   { to: "/logic-chain", icon: Share2, label: "逻辑链" },
   { to: "/agent", icon: Bot, label: "Agent" },
   { to: "/humanoid", icon: Cpu, label: "人形机器人" },

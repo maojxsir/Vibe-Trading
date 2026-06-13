@@ -9,6 +9,9 @@ const Holdings = lazy(() => import("@/pages/Holdings").then((m) => ({ default: m
 const Opportunities = lazy(() =>
   import("@/pages/Opportunities").then((m) => ({ default: m.Opportunities })),
 );
+const Screener = lazy(() =>
+  import("@/pages/Screener").then((m) => ({ default: m.Screener })),
+);
 const LogicChain = lazy(() =>
   import("@/pages/LogicChain").then((m) => ({ default: m.LogicChain })),
 );
@@ -57,6 +60,7 @@ export const router = createBrowserRouter([
       { path: "/", element: wrap(MarketOverview) },
       { path: "/holdings", element: wrap(Holdings) },
       { path: "/opportunities", element: wrap(Opportunities) },
+      { path: "/screener", element: wrap(Screener) },
       { path: "/logic-chain", element: wrap(LogicChain) },
       { path: "/humanoid", element: wrap(Humanoid) },
       { path: "/ai-compute", element: wrap(AICompute) },
