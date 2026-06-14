@@ -14,6 +14,7 @@ services:
     env_file:
       - agent/.env
     volumes:
+      - ./agent:/app/agent
       - vibe-runs:/app/agent/runs
       - vibe-sessions:/app/agent/sessions
     restart: unless-stopped

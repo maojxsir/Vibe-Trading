@@ -11,6 +11,19 @@ import { ConnectionBanner } from "@/components/layout/ConnectionBanner";
 // Bump on each release; one place keeps the footer in sync with package.json.
 const APP_VERSION = "v0.1.9";
 
+function formatSessionTime(iso?: string): string {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffDays = Math.floor(diffMs / (24 * 60 * 60 * 1000));
+  if (diffDays <= 0) return "今天";
+  if (diffDays === 1) return "昨天";
+  if (diffDays < 7) return `${diffDays} 天前`;
+  return date.toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
+}
+
 const NAV = [
   { to: "/", icon: LayoutDashboard, label: "Home" },
   { to: "/holdings", icon: ClipboardList, label: "持仓决策" },
@@ -24,7 +37,6 @@ const NAV = [
   { to: "/events", icon: Activity, label: "事件概率" },
   { to: "/news", icon: Newspaper, label: "新闻" },
   { to: "/alpha-zoo", icon: Layers, label: "Alpha Zoo" },
-  { to: "/settings", icon: Settings, label: "Settings" },
   { to: "/correlation", icon: Grid3x3, label: "Correlation Matrix" },
 ];
 
@@ -83,19 +95,24 @@ export function Layout() {
     <div className="flex h-screen bg-background">
       {/* Sidebar */}
       <aside className={cn(
-        "border-r bg-card flex flex-col shrink-0 transition-all duration-200",
-        collapsed ? "w-12" : "w-64"
+        "flex h-screen shrink-0 flex-col overflow-hidden border-r bg-card transition-all duration-200",
+        collapsed ? "w-12" : "w-72"
       )}>
         {/* Brand */}
-        <div className={cn("border-b", collapsed ? "p-2 flex justify-center" : "p-4")}>
-          <Link to="/" className={cn("flex items-center font-bold text-base tracking-tight", collapsed ? "justify-center" : "gap-2")}>
-            <BarChart3 className="h-5 w-5 text-primary shrink-0" />
+        <div className={cn("shrink-0 border-b", collapsed ? "flex justify-center p-2" : "p-4")}>
+          <Link to="/" className={cn("flex items-center text-base font-bold tracking-tight", collapsed ? "justify-center" : "gap-2")}>
+            <BarChart3 className="h-5 w-5 shrink-0 text-primary" />
             {!collapsed && "Vibe-Trading"}
           </Link>
         </div>
 
-        {/* Nav */}
-        <nav className={cn("space-y-0.5", collapsed ? "p-1" : "p-2")}>
+        {/* Nav — fills space above sessions (sessions capped at 30%) */}
+        <nav
+          className={cn(
+            "overflow-y-auto overscroll-contain",
+            collapsed ? "max-h-none shrink-0 p-1" : "min-h-0 flex-1 space-y-0.5 p-2",
+          )}
+        >
           {NAV.map(({ to, icon: Icon, label }) => {
             const text = label;
             return (
@@ -120,37 +137,46 @@ export function Layout() {
 
         {/* Sessions — hidden when collapsed */}
         {!collapsed && (
-          <div className="flex-1 overflow-auto border-t mt-2 flex flex-col">
-            <div className="flex items-center justify-between px-4 py-2">
-              <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                <MessageSquare className="h-3.5 w-3.5" />
-                Sessions
+          <div className="flex h-[30%] min-h-0 shrink-0 flex-col overflow-hidden border-t">
+            <div className="flex shrink-0 items-center justify-between px-3 py-2.5">
+              <span className="flex items-center gap-2 text-sm font-medium text-foreground">
+                <MessageSquare className="h-4 w-4 text-muted-foreground" />
+                会话
               </span>
               <Link
                 to="/agent"
-                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                title="New Chat"
+                className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                title="新建会话"
               >
                 <Plus className="h-3.5 w-3.5" />
+                新建
               </Link>
             </div>
 
-            <div className="px-2 pb-2 space-y-0.5 overflow-auto flex-1">
+            <div className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain px-2 pb-2">
               {sessionsLoading ? (
-                <div className="space-y-1.5 px-2 py-1">
+                <div className="space-y-2 px-1 py-1">
                   {[1, 2, 3].map((i) => (
-                    <div key={i} className="h-7 rounded-md bg-muted/50 animate-pulse" />
+                    <div key={i} className="h-11 rounded-lg bg-muted/50 animate-pulse" />
                   ))}
                 </div>
               ) : sessions.length === 0 ? (
-                <p className="px-3 py-2 text-xs text-muted-foreground/60">No sessions yet</p>
+                <p className="px-2 py-3 text-sm text-muted-foreground/70">暂无会话，点击「新建」开始</p>
               ) : null}
               {sessions.map((s) => {
                 const isActive = s.session_id === activeSessionId;
                 const isDeleting = deleteTarget === s.session_id;
                 const isRenaming = renameTarget === s.session_id;
+                const sessionTime = formatSessionTime(s.updated_at || s.created_at);
                 return (
-                  <div key={s.session_id} className="group relative flex items-center">
+                  <div
+                    key={s.session_id}
+                    className={cn(
+                      "group relative rounded-lg border border-transparent transition-colors",
+                      isActive && "border-primary/20 bg-primary/5",
+                      !isActive && "hover:border-border/60 hover:bg-muted/40",
+                    )}
+                  >
                     {isRenaming ? (
                       <input
                         autoFocus
@@ -158,52 +184,78 @@ export function Layout() {
                         onChange={(e) => setRenameValue(e.target.value)}
                         onKeyDown={(e) => { if (e.key === "Enter") renameSession(s.session_id); if (e.key === "Escape") setRenameTarget(null); }}
                         onBlur={() => renameSession(s.session_id)}
-                        className="flex-1 min-w-0 pl-3 pr-2 py-1 rounded-md text-xs border border-primary bg-background outline-none"
+                        className="w-full rounded-lg border border-primary bg-background px-3 py-2.5 text-sm outline-none"
                       />
                     ) : (
                       <Link
                         to={`/agent?session=${s.session_id}`}
                         className={cn(
-                          "flex-1 min-w-0 pl-3 pr-14 py-1.5 rounded-md text-xs transition-colors truncate block border-l-2",
+                          "block min-w-0 rounded-lg py-2.5 pl-3 pr-16 text-sm transition-colors",
                           isActive
-                            ? "border-l-primary bg-primary/10 text-primary font-medium"
-                            : "border-l-transparent text-muted-foreground hover:bg-muted hover:text-foreground"
+                            ? "text-primary font-medium"
+                            : "text-foreground/90 hover:text-foreground",
                         )}
                         title={s.title || s.session_id}
                       >
-                        <span className="flex items-center gap-1.5">
+                        <span className="flex items-start gap-2">
                           {streamingSessionId === s.session_id ? (
-                            <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary" />
+                            <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-primary" />
                           ) : (
                             <span className={cn(
-                              "h-1.5 w-1.5 rounded-full shrink-0",
-                              isActive ? "bg-primary/70" : "bg-muted-foreground/40"
+                              "mt-1.5 h-2 w-2 shrink-0 rounded-full",
+                              isActive ? "bg-primary" : "bg-muted-foreground/40",
                             )} />
                           )}
-                          {s.title || s.session_id.slice(0, 16)}
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate leading-snug">
+                              {s.title || s.session_id.slice(0, 16)}
+                            </span>
+                            {sessionTime && (
+                              <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                                {sessionTime}
+                              </span>
+                            )}
+                          </span>
                         </span>
                       </Link>
                     )}
                     {!isRenaming && isDeleting ? (
-                      <div className="absolute right-0.5 flex items-center gap-0.5">
-                        <button onClick={() => deleteSession(s.session_id)} className="p-1 text-danger hover:bg-danger/10 rounded text-[10px] font-medium">Confirm</button>
-                        <button onClick={() => setDeleteTarget(null)} className="p-1 text-muted-foreground hover:bg-muted rounded text-[10px]">Cancel</button>
-                      </div>
-                    ) : !isRenaming ? (
-                      <div className="absolute right-1 opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition-opacity">
+                      <div className="absolute inset-y-0 right-1 flex items-center gap-1">
                         <button
-                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); setRenameTarget(s.session_id); setRenameValue(s.title || ""); }}
-                          className="p-1 text-muted-foreground hover:text-foreground rounded"
-                          title="Rename"
+                          type="button"
+                          onClick={() => deleteSession(s.session_id)}
+                          className="rounded-md bg-danger/10 px-2 py-1 text-xs font-medium text-danger hover:bg-danger/20"
                         >
-                          <Pencil className="h-3 w-3" />
+                          确认
                         </button>
                         <button
-                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDeleteTarget(s.session_id); }}
-                          className="p-1 text-muted-foreground hover:text-danger rounded"
-                          title="Delete?"
+                          type="button"
+                          onClick={() => setDeleteTarget(null)}
+                          className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
                         >
-                          <Trash2 className="h-3 w-3" />
+                          取消
+                        </button>
+                      </div>
+                    ) : !isRenaming ? (
+                      <div className={cn(
+                        "absolute inset-y-0 right-1 flex items-center gap-0.5 transition-opacity",
+                        isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+                      )}>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); setRenameTarget(s.session_id); setRenameValue(s.title || ""); }}
+                          className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                          title="重命名"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDeleteTarget(s.session_id); }}
+                          className="rounded-md p-1.5 text-muted-foreground hover:bg-danger/10 hover:text-danger"
+                          title="删除"
+                        >
+                          <Trash2 className="h-4 w-4" />
                         </button>
                       </div>
                     ) : null}
@@ -215,38 +267,59 @@ export function Layout() {
         )}
 
         {/* Spacer when collapsed */}
-        {collapsed && <div className="flex-1" />}
+        {collapsed && <div className="min-h-0 flex-1" />}
 
-        {/* Footer */}
-        <div className={cn("border-t", collapsed ? "p-1 flex flex-col items-center gap-1" : "p-3 space-y-2")}>
+        {/* Footer — pinned below nav + sessions */}
+        <div className={cn("shrink-0 border-t bg-card", collapsed ? "flex flex-col items-center gap-1 p-1" : "space-y-2 p-3")}>
           {collapsed ? (
             <>
-              <button onClick={toggle} className="p-1.5 text-muted-foreground hover:text-foreground rounded transition-colors" title={dark ? "Light" : "Dark"}>
+              <Link
+                to="/settings"
+                className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                title="Settings"
+              >
+                <Settings className="h-3.5 w-3.5" />
+              </Link>
+              <button onClick={toggle} className="rounded p-1.5 text-muted-foreground transition-colors hover:text-foreground" title={dark ? "Light" : "Dark"}>
                 {dark ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
               </button>
-              <button onClick={() => setCollapsed(false)} className="p-1.5 text-muted-foreground hover:text-foreground rounded transition-colors" title="Expand">
+              <button onClick={() => setCollapsed(false)} className="rounded p-1.5 text-muted-foreground transition-colors hover:text-foreground" title="Expand">
                 <ChevronsRight className="h-3.5 w-3.5" />
               </button>
             </>
           ) : (
             <>
-              <div className="flex items-center justify-between">
-                <button
-                  onClick={toggle}
-                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  {dark ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
-                  {dark ? "Light" : "Dark"}
-                </button>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => setCollapsed(true)}
-                    className="p-1 text-muted-foreground hover:text-foreground rounded transition-colors"
-                    title="Collapse"
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex min-w-0 flex-1 items-center gap-1">
+                  <Link
+                    to="/settings"
+                    className={cn(
+                      "inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs transition-colors",
+                      pathname.startsWith("/settings")
+                        ? "bg-primary/10 font-medium text-primary"
+                        : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                    )}
                   >
-                    <ChevronsLeft className="h-3.5 w-3.5" />
+                    <Settings className="h-3.5 w-3.5 shrink-0" />
+                    Settings
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={toggle}
+                    className="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  >
+                    {dark ? <Sun className="h-3.5 w-3.5 shrink-0" /> : <Moon className="h-3.5 w-3.5 shrink-0" />}
+                    {dark ? "Light" : "Dark"}
                   </button>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setCollapsed(true)}
+                  className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
+                  title="Collapse"
+                >
+                  <ChevronsLeft className="h-3.5 w-3.5" />
+                </button>
               </div>
               <p className="text-xs text-muted-foreground/60">{APP_VERSION}</p>
             </>

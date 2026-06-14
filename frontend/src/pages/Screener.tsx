@@ -10,7 +10,6 @@ import type { StockChartTarget } from "@/contexts/StockChartDrawerContext";
 import { opportunitiesSeed, type Opportunity } from "@/data/opportunitiesSeed";
 import { api } from "@/lib/api";
 import { launchAgentFromPage } from "@/lib/agent-launch";
-import { fmtPct } from "@/lib/cn-market";
 import { loadPersisted, savePersisted } from "@/lib/persist";
 import { cn } from "@/lib/utils";
 import {
@@ -88,20 +87,23 @@ function SortHeader({
   dir,
   onClick,
   align = "left",
+  title,
 }: {
   label: string;
   active: boolean;
   dir: SortDir;
   onClick: () => void;
   align?: "left" | "right";
+  title?: string;
 }) {
   return (
     <th className={cn("px-3 py-2 font-medium", align === "right" ? "text-right" : "text-left")}>
       <button
         type="button"
         onClick={onClick}
+        title={title}
         className={cn(
-          "inline-flex items-center gap-0.5 hover:text-foreground",
+          "inline-flex items-center gap-0.5 whitespace-nowrap hover:text-foreground",
           active ? "text-foreground" : "text-muted-foreground",
         )}
       >
@@ -110,6 +112,10 @@ function SortHeader({
       </button>
     </th>
   );
+}
+
+function formatPositionPct(ratio: number): string {
+  return `${(ratio * 100).toFixed(1)}%`;
 }
 
 export function Screener() {
@@ -254,7 +260,7 @@ export function Screener() {
         `${row.market_cap ? `总市值：${formatMarketCap(row.market_cap)}\n` : ""}` +
         `${row.main_business ? `主营业务：${row.main_business}\n` : ""}` +
         `综合评分：${row.score.toFixed(1)}\n` +
-        `四信号：${summary}\n位置分位：${row.position_pct.toFixed(1)}%\n` +
+        `四信号：${summary}\n位置分位：${formatPositionPct(row.position_pct)}\n` +
         `${row.untradable ? "状态：不可交易（一字/停牌等）\n" : ""}` +
         `\n要求：\n1. 用 web_search 检索最新题材、连板逻辑、资金与风险；\n` +
         `2. 评估四信号是否支持次日打板/接力；\n` +
@@ -392,7 +398,12 @@ export function Screener() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b text-xs">
-                  <SortHeader label="名称/代码" active={sortKey === "name"} dir={sortDir} onClick={() => handleSort("name")} />
+                  <SortHeader
+                    label="名称/代码"
+                    active={sortKey === "name"}
+                    dir={sortDir}
+                    onClick={() => handleSort("name")}
+                  />
                   <th className="px-3 py-2 text-left font-medium text-muted-foreground">行业/主营业务</th>
                   <SortHeader label="现价" active={sortKey === "price"} dir={sortDir} onClick={() => handleSort("price")} align="right" />
                   <SortHeader label="PE(TTM)" active={sortKey === "pe_ttm"} dir={sortDir} onClick={() => handleSort("pe_ttm")} align="right" />
@@ -401,11 +412,12 @@ export function Screener() {
                   <SortHeader label="评分" active={sortKey === "score"} dir={sortDir} onClick={() => handleSort("score")} align="right" />
                   <th className="px-3 py-2 text-left font-medium text-muted-foreground">四信号</th>
                   <SortHeader
-                    label="位置%"
+                    label="位置分位"
                     active={sortKey === "position_pct"}
                     dir={sortDir}
                     onClick={() => handleSort("position_pct")}
                     align="right"
+                    title="近250日收盘价在区间高低点之间的相对位置，越高越接近阶段高位"
                   />
                   <th className="px-3 py-2 text-left font-medium text-muted-foreground">状态</th>
                   <th className="px-3 py-2 text-right font-medium text-muted-foreground">操作</th>
@@ -418,7 +430,7 @@ export function Screener() {
                     onClick={() => setChartTarget({ code: row.code, name: row.name })}
                     className="cursor-pointer border-b border-border/60 last:border-0 hover:bg-muted/40"
                   >
-                    <td className="px-3 py-2.5">
+                    <td className="whitespace-nowrap px-3 py-2.5">
                       <div className="font-medium text-foreground">{row.name}</div>
                       <div className="text-xs tabular-nums text-muted-foreground">{row.code}</div>
                     </td>
@@ -459,8 +471,11 @@ export function Screener() {
                     <td className="px-3 py-2.5">
                       <SignalMiniBars signals={row.signals} />
                     </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">
-                      {fmtPct(row.position_pct)}
+                    <td
+                      className="px-3 py-2.5 text-right tabular-nums text-muted-foreground"
+                      title="近250日区间相对位置"
+                    >
+                      {formatPositionPct(row.position_pct)}
                     </td>
                     <td className="px-3 py-2.5">
                       <div className="flex flex-wrap items-center gap-1">
