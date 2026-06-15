@@ -47,6 +47,7 @@ def _ensure_registered() -> None:
     _registered = True
 
     _loader_modules = [
+        "backtest.loaders.mongodb_loader",
         "backtest.loaders.tushare",
         "backtest.loaders.okx",
         "backtest.loaders.yfinance_loader",
@@ -68,7 +69,7 @@ def _ensure_registered() -> None:
 # ---------------------------------------------------------------------------
 
 FALLBACK_CHAINS: dict[str, list[str]] = {
-    "a_share":   ["tushare", "mootdx", "akshare"],
+    "a_share":   ["mongodb", "tushare", "mootdx", "akshare"],
     "us_equity": ["yfinance", "akshare"],
     "hk_equity": ["yfinance", "futu", "akshare"],
     "crypto":    ["okx", "ccxt", "yfinance"],

@@ -1,0 +1,6 @@
+# Copy to ~/stock-sync/.sync_env or tools/.sync_env on the ECS host.
+# stock-sync runs on the host (not inside Docker), so use 127.0.0.1.
+MONGO_URI=mongodb://127.0.0.1:27017
+MONGO_DB=stock_data
+TUSHARE_TOKEN=your-tushare-token
+BATCH_SIZE=200

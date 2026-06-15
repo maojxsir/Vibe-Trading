@@ -490,6 +490,16 @@ class ScreenerStore:
     ) -> pd.DataFrame | None:
         td = normalize_trade_date(trade_date)
 
+        try:
+            from src.data import mongodb_stock
+
+            if mongodb_stock.is_mongodb_available():
+                mongo_panel = mongodb_stock.fetch_trade_date_panel(td)
+                if mongo_panel is not None and not mongo_panel.empty:
+                    return mongo_panel
+        except Exception as exc:  # noqa: BLE001 - fall back to Tushare
+            logger.debug("screener MongoDB partition miss for %s: %s", td, exc)
+
         def _fetch_daily() -> pd.DataFrame:
             frame = pro.daily(trade_date=td, fields=DAILY_FIELDS)
             if frame is None:

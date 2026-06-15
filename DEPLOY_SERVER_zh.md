@@ -250,11 +250,81 @@ openssl rand -hex 32
 
 | 变量 | 说明 |
 |------|------|
-| `TUSHARE_TOKEN` | A 股 Tushare Pro token |
+| `TUSHARE_TOKEN` | A 股 Tushare Pro token（MongoDB 缺数据时用于按需补数） |
+| `VIBE_USE_MONGODB` | 设为 `1` 启用 MongoDB 优先读本地 `stock_data` 库 |
+| `MONGO_URI` | MongoDB 连接串，例如 `mongodb://127.0.0.1:27017` |
+| `MONGO_DB` | 数据库名，默认 `stock_data` |
+| `VIBE_MONGODB_ON_DEMAND_SYNC` | 缺数据时自动调用 `tools/stock_data_sync.py` 写入 MongoDB |
 | `CORS_ORIGINS` | 若通过独立域名访问，可设置允许的 origin |
 | `VIBE_TRADING_SSE_TIMEOUT` | 慢模型可适当增大 SSE 超时 |
 
 完整说明见 `agent/.env.example`。
+
+### 5.3.1 接入已有 MongoDB（`stock_data`）
+
+你的 ECS 实测（本机 mongod、无鉴权、`stock_data` 已有数据）：
+
+| 集合 | 条数（示例） |
+|------|-------------|
+| `stock_basic_info` | 5854 |
+| `stock_daily_quotes` | 12584566 |
+| `stock_financial_data` | 194742 |
+
+**① 宿主机 `~/stock-sync/.sync_env`（cron 增量同步用）：**
+
+```bash
+MONGO_URI=mongodb://127.0.0.1:27017
+MONGO_DB=stock_data
+TUSHARE_TOKEN=你的token
+```
+
+一键生成（在 Vibe-Trading 仓库 `tools/` 目录）：
+
+```bash
+bash init_sync_env.sh ~/stock-sync/.sync_env
+bash ensure_mongo.sh
+bash install_cron.sh
+```
+
+**② `~/TradingBuddy/agent/.env`（Vibe-Trading Docker 用）：**
+
+```bash
+VIBE_USE_MONGODB=1
+MONGO_URI=mongodb://host.docker.internal:27017
+MONGO_DB=stock_data
+VIBE_MONGODB_ON_DEMAND_SYNC=1
+TUSHARE_TOKEN=你的token
+```
+
+> Docker 容器里的 `127.0.0.1` 是容器自身，**不能**填 `mongodb://127.0.0.1:27017`。
+
+**③ 一次性：让容器能连宿主机 mongod（Linux 必做）：**
+
+```bash
+cd ~/TradingBuddy
+sudo bash tools/configure_mongodb_docker_access.sh
+```
+
+**④ 重建 Vibe-Trading 容器：**
+
+```bash
+cd ~/TradingBuddy
+docker compose -f docker-compose.prod.yml up -d --force-recreate
+```
+
+**⑤ 容器内验证：**
+
+```bash
+docker compose -f docker-compose.prod.yml exec vibe-trading python -c "
+from pymongo import MongoClient
+c = MongoClient('mongodb://host.docker.internal:27017', serverSelectionTimeoutMS=5000)
+print('daily_quotes', c['stock_data']['stock_daily_quotes'].estimated_document_count())
+"
+```
+
+应输出约 `12584566`（或与 mongosh 接近的数量）。
+
+`docker-compose.prod.yml` 已包含 `extra_hosts: host.docker.internal:host-gateway` 与 `./tools` 只读挂载（按需补数）。
 
 ### 5.4 从本机上传已有配置
 

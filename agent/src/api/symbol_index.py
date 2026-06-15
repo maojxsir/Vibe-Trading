@@ -93,24 +93,40 @@ def load_index(force: bool = False) -> list[dict[str, str]]:
     if not force and _cache_rows is not None and now - _cache_at < _CACHE_TTL_SECONDS:
         return list(_cache_rows)
 
-    token = os.getenv("TUSHARE_TOKEN", "").strip()
+    rows: list[dict[str, str]] | None = None
     try:
-        if not token:
-            raise RuntimeError("TUSHARE_TOKEN is not configured")
-        import tushare as ts  # type: ignore
+        from src.data import mongodb_stock
 
-        pro = ts.pro_api(token)
-        df = pro.stock_basic(
-            list_status="L",
-            fields="ts_code,symbol,name,cnspell,list_date",
-        )
-        rows = _rows_from_records(df.to_dict("records"))
-        if not rows:
-            raise RuntimeError("empty Tushare stock_basic response")
-        _cache_rows = _merge_seed_rows(rows)
-    except Exception as exc:  # noqa: BLE001 - UI can still use seed suggestions
-        logger.warning("A-share symbol index fallback to seeds: %s", exc)
-        _cache_rows = _seed_rows()
+        if mongodb_stock.is_mongodb_available():
+            mongo_rows = mongodb_stock.fetch_basic_info_records(list_status="L")
+            rows = _rows_from_records(mongo_rows)
+            if not rows:
+                raise RuntimeError("empty MongoDB stock_basic_info response")
+    except Exception as exc:  # noqa: BLE001 - fall through to Tushare/seeds
+        logger.debug("MongoDB symbol index unavailable: %s", exc)
+
+    if rows is None:
+        token = os.getenv("TUSHARE_TOKEN", "").strip()
+        try:
+            if not token:
+                raise RuntimeError("TUSHARE_TOKEN is not configured")
+            import tushare as ts  # type: ignore
+
+            pro = ts.pro_api(token)
+            df = pro.stock_basic(
+                list_status="L",
+                fields="ts_code,symbol,name,cnspell,list_date",
+            )
+            rows = _rows_from_records(df.to_dict("records"))
+            if not rows:
+                raise RuntimeError("empty Tushare stock_basic response")
+        except Exception as exc:  # noqa: BLE001 - UI can still use seed suggestions
+            logger.warning("A-share symbol index fallback to seeds: %s", exc)
+            _cache_rows = _seed_rows()
+            _cache_at = now
+            return list(_cache_rows)
+
+    _cache_rows = _merge_seed_rows(rows)
 
     _cache_at = now
     return list(_cache_rows)

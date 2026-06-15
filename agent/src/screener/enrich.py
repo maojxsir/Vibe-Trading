@@ -62,14 +62,27 @@ def _load_static_meta(pro) -> dict[str, dict[str, str]]:
     meta: dict[str, dict[str, str]] = {}
 
     try:
-        basic = pro.stock_basic(list_status="L", fields="ts_code,symbol,industry")
-        for row in basic.to_dict("records"):
-            code = bare_code(str(row.get("symbol") or row.get("ts_code") or ""))
-            if not code:
-                continue
-            meta.setdefault(code, {})["industry"] = str(row.get("industry") or "").strip()
-    except Exception as exc:  # noqa: BLE001 - 行业缺失不致命
-        logger.warning("screener enrich: stock_basic industry failed: %s", exc)
+        from src.data import mongodb_stock
+
+        if mongodb_stock.is_mongodb_available():
+            for row in mongodb_stock.fetch_basic_info_records(list_status="L"):
+                code = bare_code(str(row.get("symbol") or row.get("ts_code") or ""))
+                if not code:
+                    continue
+                meta.setdefault(code, {})["industry"] = str(row.get("industry") or "").strip()
+    except Exception as exc:  # noqa: BLE001 - fall through to Tushare
+        logger.debug("screener enrich: MongoDB industry lookup failed: %s", exc)
+
+    if not meta:
+        try:
+            basic = pro.stock_basic(list_status="L", fields="ts_code,symbol,industry")
+            for row in basic.to_dict("records"):
+                code = bare_code(str(row.get("symbol") or row.get("ts_code") or ""))
+                if not code:
+                    continue
+                meta.setdefault(code, {})["industry"] = str(row.get("industry") or "").strip()
+        except Exception as exc:  # noqa: BLE001 - 行业缺失不致命
+            logger.warning("screener enrich: stock_basic industry failed: %s", exc)
 
     try:
         comp = pro.stock_company(fields="ts_code,main_business")
