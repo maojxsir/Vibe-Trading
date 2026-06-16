@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, type PriceBar } from "@/lib/api";
+import { api, KLINE_MAX_DAYS, type PriceBar } from "@/lib/api";
 
 const TTL_MS = 5 * 60 * 1000;
 const cache = new Map<string, { bars: PriceBar[]; at: number; source: string }>();
@@ -32,7 +32,7 @@ export function useStockKline(code: string | null) {
     setError(null);
 
     api
-      .getKline(code)
+      .getKline(code, KLINE_MAX_DAYS)
       .then((res) => {
         if (cancelled) return;
         if (res.stale || res.bars.length === 0) {

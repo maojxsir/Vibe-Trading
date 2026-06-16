@@ -66,6 +66,30 @@ def test_fetch_kline_success(monkeypatch):
     assert len(payload["bars"]) == 3
 
 
+def test_fetch_kline_caps_days(monkeypatch):
+    captured: dict[str, str] = {}
+
+    class _CapturingLoader:
+        name = "fake"
+
+        def fetch(self, codes, start_date, end_date, *, interval="1D", fields=None):
+            captured["start_date"] = start_date
+            captured["end_date"] = end_date
+            return {}
+
+    monkeypatch.setattr(
+        "backtest.loaders.registry.resolve_loader",
+        lambda market: _CapturingLoader(),
+    )
+    monkeypatch.setattr(market_kline, "lookup_symbol_name", lambda code, fallback=None: None)
+    payload = market_kline.fetch_kline("688017", days=99999)
+    assert payload["stale"] is True
+    # window clamped to _MAX_DAYS calendar days
+    start = pd.Timestamp(captured["start_date"])
+    end = pd.Timestamp(captured["end_date"])
+    assert (end - start).days <= market_kline._MAX_DAYS
+
+
 def test_fetch_kline_invalid_code():
     payload = market_kline.fetch_kline("bad")
     assert payload["stale"] is True

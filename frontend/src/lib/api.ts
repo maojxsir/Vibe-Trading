@@ -16,6 +16,9 @@ export class ApiError extends Error {
 export const AUTH_REQUIRED_MESSAGE =
   "Remote API access requires an API key. Add it in Settings, or run the backend on localhost for local-only use.";
 
+export const BACKEND_UNREACHABLE_MESSAGE =
+  "后端 API 未响应。请先启动 agent 服务（默认端口 8899），例如：cd agent && uvicorn api_server:app --host 127.0.0.1 --port 8899";
+
 export function isAuthRequiredError(error: unknown): boolean {
   return error instanceof ApiError && (error.status === 401 || error.status === 403);
 }
@@ -28,6 +31,8 @@ async function errorFromResponse(res: Response): Promise<ApiError> {
   } catch { /* ignore */ }
   if (res.status === 401 || res.status === 403) {
     detail = AUTH_REQUIRED_MESSAGE;
+  } else if (res.status >= 500) {
+    detail = BACKEND_UNREACHABLE_MESSAGE;
   }
   return new ApiError(detail, res.status);
 }
@@ -102,6 +107,9 @@ export interface MarketQuotesWire {
   source: string;
   stale: boolean;
 }
+/** Calendar-day lookback for K-line drawer; matches backend ``_MAX_DAYS``. */
+export const KLINE_MAX_DAYS = 15000;
+
 export interface MarketKlineWire {
   code: string;
   name: string | null;
@@ -196,7 +204,7 @@ export const api = {
   getMarketOverview: () => request<MarketOverviewWire>("/market/overview"),
   getQuotes: (codes: string[]) =>
     request<MarketQuotesWire>(`/market/quotes?codes=${encodeURIComponent(codes.join(","))}`),
-  getKline: (code: string, days = 365) =>
+  getKline: (code: string, days = KLINE_MAX_DAYS) =>
     request<MarketKlineWire>(`/market/kline?code=${encodeURIComponent(code)}&days=${days}`),
   searchSymbols: (q: string, boost: string[] = [], limit = 12) => {
     const params = new URLSearchParams();

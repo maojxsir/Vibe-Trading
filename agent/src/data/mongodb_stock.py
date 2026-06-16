@@ -10,6 +10,7 @@ import logging
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
@@ -86,17 +87,29 @@ def _sync_script_path() -> Path:
     return _project_root() / "tools" / "stock_data_sync.py"
 
 
+_FAIL_BACKOFF_S = 30.0
+_fail_until = 0.0
+
 @lru_cache(maxsize=1)
 def _get_db():
-    """Return a cached MongoDB database handle."""
+    """Return a cached MongoDB database handle, with failure backoff."""
+    global _fail_until
     import pymongo
 
-    client = pymongo.MongoClient(
-        mongo_uri(),
-        serverSelectionTimeoutMS=5000,
-    )
-    client.server_info()
-    return client[mongo_db_name()]
+    now = time.monotonic()
+    if now < _fail_until:
+        raise ConnectionError("MongoDB unavailable (cached backoff)")
+
+    try:
+        client = pymongo.MongoClient(
+            mongo_uri(),
+            serverSelectionTimeoutMS=5000,
+        )
+        client.server_info()
+        return client[mongo_db_name()]
+    except Exception:
+        _fail_until = now + _FAIL_BACKOFF_S
+        raise
 
 
 def is_mongodb_available() -> bool:
@@ -263,17 +276,18 @@ def coverage_is_sufficient(
     *,
     min_rows: int = 1,
 ) -> bool:
-    """Heuristic: MongoDB slice is usable when it has rows in range."""
+    """Heuristic: MongoDB slice is usable when it has rows through the recent window.
+
+    Stocks listed after ``start_date`` are allowed — only the end of the range
+    must be sufficiently fresh for UI/backtest use.
+    """
     if frame is None or frame.empty:
         return False
     if len(frame) < min_rows:
         return False
-    start_ts = pd.Timestamp(start_date)
     end_ts = pd.Timestamp(end_date)
     index = frame.index
-    if index.min() > start_ts + pd.Timedelta(days=7):
-        return False
-    if index.max() < end_ts - pd.Timedelta(days=7):
+    if index.max() < end_ts - pd.Timedelta(days=14):
         return False
     return True
 

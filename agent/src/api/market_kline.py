@@ -13,7 +13,7 @@ from src.api import symbol_index
 
 logger = logging.getLogger(__name__)
 
-_MAX_DAYS = 500
+_MAX_DAYS = 15000
 _DEFAULT_DAYS = 365
 _BARE_CODE = re.compile(r"^\d{6}$")
 
@@ -35,6 +35,15 @@ def lookup_symbol_name(code: str, fallback: Optional[str] = None) -> Optional[st
         if row.get("code") == code:
             return row.get("name") or fallback
     return fallback
+
+
+def _lookup_list_date(code: str) -> Optional[str]:
+    """Return Tushare-style ``YYYYMMDD`` list date when known."""
+    for row in symbol_index.load_index():
+        if row.get("code") == code:
+            raw = str(row.get("list_date") or "").strip()
+            return raw or None
+    return None
 
 
 def dataframe_to_bars(df: pd.DataFrame) -> List[Dict[str, Any]]:
@@ -76,6 +85,14 @@ def fetch_kline(code: str, days: int = _DEFAULT_DAYS) -> Dict[str, Any]:
     window = max(1, min(int(days), _MAX_DAYS))
     end = datetime.now().date()
     start = end - timedelta(days=window)
+    list_date_raw = _lookup_list_date(bare)
+    if list_date_raw:
+        try:
+            listed = datetime.strptime(list_date_raw[:8], "%Y%m%d").date()
+            if listed > start:
+                start = listed
+        except ValueError:
+            pass
     start_date = start.strftime("%Y-%m-%d")
     end_date = end.strftime("%Y-%m-%d")
 

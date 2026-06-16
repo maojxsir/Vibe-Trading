@@ -71,7 +71,7 @@ async def market_overview() -> Dict[str, object]:
 @router.get("/kline")
 async def market_kline(
     code: str = Query("", description="Bare or prefixed A-share code, e.g. 688017"),
-    days: int = Query(365, ge=1, le=500, description="Lookback window in calendar days"),
+    days: int = Query(365, ge=1, le=15000, description="Lookback window in calendar days"),
 ) -> Dict[str, object]:
     """Return daily OHLCV bars for one symbol (K-line drawer)."""
     import asyncio

@@ -5,7 +5,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import subprocess
+import sys
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,13 +19,15 @@ from src.screener.scan import (
     _config_params_snapshot,
     load_latest_result,
     load_result,
-    run,
     screener_results_root,
 )
 
 logger = logging.getLogger(__name__)
 
 _STATE_LOCK = threading.Lock()
+_SCAN_TIMEOUT_S = 3600
+_STALE_LOCK_MAX_AGE_S = 2 * 60 * 60
+_ORPHAN_LOCK_GRACE_S = 10 * 60
 
 
 def screener_state_root() -> Path:
@@ -38,6 +43,15 @@ def status_path() -> Path:
 def lock_path() -> Path:
     """Return the screener scan lock file path."""
     return screener_state_root() / "scan.lock"
+
+
+def _agent_dir() -> Path:
+    """Return the ``agent/`` directory (parent of ``src/``)."""
+    return Path(__file__).resolve().parents[2]
+
+
+def _scan_script_path() -> Path:
+    return _agent_dir() / "scripts" / "run_screener.py"
 
 
 def _utc_now_iso() -> str:
@@ -172,11 +186,88 @@ def _release_lock() -> None:
         logger.warning("screener lock release failed: %s", exc)
 
 
+def _read_lock_payload() -> dict[str, Any] | None:
+    path = lock_path()
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("screener lock read failed (%s): %s", path, exc)
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _pid_is_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    else:
+        return True
+
+
+def _clear_stale_lock(*, max_age_seconds: float = _STALE_LOCK_MAX_AGE_S) -> None:
+    """Drop orphaned lock files left behind when the API process died mid-scan."""
+    path = lock_path()
+    if not path.is_file():
+        return
+    try:
+        age_seconds = time.time() - path.stat().st_mtime
+    except OSError as exc:
+        logger.warning("screener lock stat failed: %s", exc)
+        return
+
+    if age_seconds > max_age_seconds:
+        logger.warning("screener stale lock removed (age %.0fs)", age_seconds)
+        _release_lock()
+        return
+
+    payload = _read_lock_payload() or {}
+    worker_pid = int(payload.get("workerPid") or 0)
+    if worker_pid and not _pid_is_alive(worker_pid):
+        logger.warning("screener orphan lock removed (worker pid %s gone)", worker_pid)
+        _release_lock()
+        return
+
+    if age_seconds > _ORPHAN_LOCK_GRACE_S and not worker_pid:
+        logger.warning("screener legacy lock removed (age %.0fs)", age_seconds)
+        _release_lock()
+
+
 def _run_scan_worker() -> None:
+    """Run the heavy scan in a child process so API memory spikes cannot take down uvicorn."""
+    script = _scan_script_path()
     try:
         _write_status(state="running", progress=0, message="scan started")
-        run(ScreenerConfig())
+        proc = subprocess.run(
+            [sys.executable, str(script)],
+            cwd=str(_agent_dir()),
+            env=os.environ.copy(),
+            capture_output=True,
+            text=True,
+            timeout=_SCAN_TIMEOUT_S,
+            check=False,
+        )
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout or "").strip()
+            if not detail:
+                detail = f"screener exited with code {proc.returncode}"
+            logger.error("screener subprocess failed: %s", detail[:1000])
+            _write_status(state="failed", progress=0, message=detail[:500])
+            return
         _write_status(state="done", progress=100, message="scan complete")
+    except subprocess.TimeoutExpired:
+        logger.error("screener subprocess timed out after %ss", _SCAN_TIMEOUT_S)
+        _write_status(
+            state="failed",
+            progress=0,
+            message=f"screener timed out after {_SCAN_TIMEOUT_S // 60} minutes",
+        )
     except Exception as exc:  # noqa: BLE001 - surface failure via status.json
         logger.exception("screener refresh failed")
         _write_status(state="failed", progress=0, message=str(exc))
@@ -188,15 +279,23 @@ def _run_scan_worker() -> None:
 def trigger_refresh() -> tuple[int, dict[str, Any]]:
     """Start a background screener scan when no lock is held."""
     with _STATE_LOCK:
+        _clear_stale_lock()
         if lock_path().is_file():
             return 409, {"accepted": False, "message": "scan already running"}
 
         screener_state_root().mkdir(parents=True, exist_ok=True)
-        _write_json_atomic(lock_path(), {"startedAt": _utc_now_iso()})
+        worker = threading.Thread(target=_run_scan_worker, name="screener-scan", daemon=True)
         _write_status(state="running", progress=0, message="scan accepted")
+        worker.start()
+        _write_json_atomic(
+            lock_path(),
+            {
+                "startedAt": _utc_now_iso(),
+                "apiPid": os.getpid(),
+                "workerPid": worker.ident,
+            },
+        )
 
-    thread = threading.Thread(target=_run_scan_worker, name="screener-scan", daemon=True)
-    thread.start()
     return 202, {"accepted": True}
 
 
