@@ -379,15 +379,36 @@ python -c "from dotenv import load_dotenv; load_dotenv('.env'); from src.data im
 
 剔除规则（任一命中即剔除，`30` 交易日为最长跟踪上限）：连续 `SCREENER_TRACKING_NEW_LOW_STREAK`（默认 3）日创收盘新低，或均线空头排列 `MA5<MA10<MA20<MA60`。
 
-跟踪更新在每次扫描结束后自动执行；也可用独立 CLI 供 cron 每日收盘后调度：
+跟踪更新在每次扫描结束后自动执行；也可用独立 CLI（`scripts/run_tracking.py`）供 cron 调度。
+
+> 跟踪的空头排列规则依赖 ≥60 个交易日历史；若 `stock_daily_quotes` 覆盖不足，扫描会自动用 Tushare 面板回填（需 `TUSHARE_TOKEN`）。
+
+#### Docker 部署下如何让网页有数据（重要）
+
+打板扫描页面**读取的是磁盘 JSON 结果**（`~/.vibe-trading/screener/results/`），不是 MongoDB。容器以用户 `vibe` 运行，结果落在容器内 `/home/vibe/.vibe-trading`，已通过 `docker-compose.prod.yml` 的 `vibe-data` 卷持久化（重建不丢、面板缓存复用）。
+
+因此**扫描必须在容器内运行**，宿主机直接跑 `run_screener.py` 写到宿主机 `~/.vibe-trading`，容器里的网页读不到。
 
 ```bash
-cd agent && source .venv/bin/activate
-python scripts/run_tracking.py            # 默认用面板最新交易日
-python scripts/run_tracking.py --date 2026-06-16
+cd ~/TradingBuddy
+
+# 手动跑一次全量扫描（首次几~二十几分钟；会回填 Tushare 历史、写 JSON、双写 Mongo、推进跟踪池）
+docker compose -f docker-compose.prod.yml exec -w /app/agent vibe-trading \
+  python scripts/run_screener.py
+
+# 只更新跟踪池（不重新选股，收盘后增量判定）
+docker compose -f docker-compose.prod.yml exec -w /app/agent vibe-trading \
+  python scripts/run_tracking.py
 ```
 
-> 跟踪的空头排列规则依赖 ≥60 个交易日历史；若 `stock_daily_quotes` 覆盖不足，先用 `tools/stock_data_sync.py` 回填，或开启 `VIBE_MONGODB_ON_DEMAND_SYNC` 按需补数。
+每日定时（宿主机 crontab，用 `docker exec` 进容器跑，避免路径不一致）：
+
+```cron
+# 收盘后跑全量扫描（自动推进跟踪池）。按服务器时区调整时间。
+30 15 * * 1-5 cd ~/TradingBuddy && docker compose -f docker-compose.prod.yml exec -T -w /app/agent vibe-trading python scripts/run_screener.py >> ~/screener-cron.log 2>&1
+```
+
+> 网页上的「刷新扫描」按钮等价于在容器内触发一次扫描；从公网 IP 访问时该接口需要鉴权，须在 `agent/.env` 设置 `API_AUTH_KEY` 并在前端「设置」里填入相同 key，否则会提示需要 API key。本机 loopback 访问免鉴权。
 
 ### 5.4 从本机上传已有配置
 

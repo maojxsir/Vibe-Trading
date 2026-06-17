@@ -22,6 +22,12 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   (`ControlMaster=no`) so it isn't torn down by other multiplexed SSH sessions.
 
 ### Changed
+- **Prod deploy: persist screener data across rebuilds.** `docker-compose.prod.yml`
+  now mounts a `vibe-data` volume at `/home/vibe/.vibe-trading` (results, panel
+  cache, scan status), and the image pre-creates that dir owned by the `vibe` user.
+  Documented in `DEPLOY_SERVER_zh.md` that screener scans must run inside the
+  container (the web reads on-disk JSON, not MongoDB), with `docker exec` examples
+  for manual runs and cron.
 
 ### Fixed
 

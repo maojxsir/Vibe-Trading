@@ -23,8 +23,12 @@ services:
       - ./tools:/app/tools:ro
       - vibe-runs:/app/agent/runs
       - vibe-sessions:/app/agent/sessions
+      # Screener results / panel cache / scan status live under the service user's
+      # home. Persist them so rebuilds don't wipe results and the web keeps data.
+      - vibe-data:/home/vibe/.vibe-trading
     restart: unless-stopped
 
 volumes:
   vibe-runs:
   vibe-sessions:
+  vibe-data:
