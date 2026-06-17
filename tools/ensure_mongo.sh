@@ -12,8 +12,12 @@ fi
 
 MONGO_URI="${MONGO_URI:-mongodb://127.0.0.1:27017}"
 PORT="${MONGO_PORT:-27017}"
-DBPATH="${MONGO_DBPATH:-/usr/local/var/mongodb}"
-LOGPATH="${MONGO_LOGPATH:-/usr/local/var/log/mongodb/mongo.log}"
+# Default to the Linux systemd package data dir; never silently create an empty
+# DB under the Homebrew path /usr/local/var/mongodb.
+DBPATH="${MONGO_DBPATH:-/var/lib/mongodb}"
+LOGPATH="${MONGO_LOGPATH:-/var/log/mongodb/mongod.log}"
+# Bind loopback + docker bridge so containers can reach the host mongod.
+BIND_IP="${MONGO_BIND_IP:-127.0.0.1,172.17.0.1}"
 
 port_open() {
     if command -v lsof >/dev/null 2>&1; then
@@ -52,38 +56,41 @@ fi
 
 echo "⏳ MongoDB 未运行，尝试启动..."
 
-mkdir -p "$DBPATH" "$(dirname "$LOGPATH")"
-
-MONGOD_BIN=""
-for candidate in \
-    /tmp/mongod-arm64 \
-    /usr/local/bin/mongod \
-    /opt/homebrew/bin/mongod \
-    "$(command -v mongod 2>/dev/null || true)"; do
-    if [ -n "$candidate" ] && [ -x "$candidate" ]; then
-        MONGOD_BIN="$candidate"
-        break
+# Prefer the systemd unit (reads /etc/mongod.conf, so dbPath/bindIp stay correct)
+# instead of a manual --dbpath start that can create an empty DB.
+if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files 2>/dev/null | grep -q '^mongod\.service'; then
+    echo "   使用 systemd: systemctl start mongod"
+    sudo systemctl start mongod 2>/dev/null || systemctl start mongod
+elif command -v brew >/dev/null 2>&1; then
+    echo "   尝试: brew services start mongodb-community"
+    brew services start mongodb-community >/dev/null 2>&1 || brew services start mongodb/brew/mongodb-community >/dev/null 2>&1 || true
+else
+    # Last-resort manual start (uses the corrected DBPATH/BIND_IP defaults).
+    mkdir -p "$DBPATH" "$(dirname "$LOGPATH")"
+    MONGOD_BIN=""
+    for candidate in \
+        /usr/bin/mongod \
+        /usr/local/bin/mongod \
+        /opt/homebrew/bin/mongod \
+        /tmp/mongod-arm64 \
+        "$(command -v mongod 2>/dev/null || true)"; do
+        if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+            MONGOD_BIN="$candidate"
+            break
+        fi
+    done
+    if [ -z "$MONGOD_BIN" ]; then
+        echo "❌ 找不到 mongod，请先安装 MongoDB" >&2
+        exit 1
     fi
-done
-
-if [ -n "$MONGOD_BIN" ]; then
-    echo "   使用: $MONGOD_BIN"
+    echo "   使用: $MONGOD_BIN (dbpath=$DBPATH)"
     "$MONGOD_BIN" \
         --dbpath "$DBPATH" \
         --port "$PORT" \
         --logpath "$LOGPATH" \
         --logappend \
-        --bind_ip 127.0.0.1 \
+        --bind_ip "$BIND_IP" \
         --fork
-elif command -v brew >/dev/null 2>&1; then
-    echo "   尝试: brew services start mongodb-community"
-    brew services start mongodb-community >/dev/null 2>&1 || brew services start mongodb/brew/mongodb-community >/dev/null 2>&1 || true
-elif command -v systemctl >/dev/null 2>&1; then
-    echo "   尝试: systemctl start mongod"
-    sudo systemctl start mongod
-else
-    echo "❌ 找不到 mongod，请先安装 MongoDB" >&2
-    exit 1
 fi
 
 if wait_ready; then

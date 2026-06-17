@@ -30,6 +30,13 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   for manual runs and cron.
 
 ### Fixed
+- **`tools/ensure_mongo.sh` no longer creates an empty DB on the wrong path.**
+  It now prefers the systemd `mongod` unit (honoring `/etc/mongod.conf`), and the
+  manual-start fallback defaults to `/var/lib/mongodb` (was the Homebrew path
+  `/usr/local/var/mongodb`) and binds `127.0.0.1,172.17.0.1`. Previously, if the
+  daily-sync cron ran while no `mongod` was listening, it started a fresh `mongod`
+  on the empty Homebrew path, so syncs wrote to a near-empty database while the
+  real dataset sat unserved.
 
 ## [0.1.9] — 2026-06-01
 
