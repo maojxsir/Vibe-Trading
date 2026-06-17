@@ -29,9 +29,16 @@ ENV PIP_INDEX_URL=${PIP_INDEX_URL} \
     PIP_TRUSTED_HOST=mirrors.aliyun.com \
     PIP_DEFAULT_TIMEOUT=300
 
+# Debian APT: default Aliyun mirror for CN ECS builds (deb.debian.org is rate-
+# limited from CN and stalls the build); override for other regions:
+#   docker build --build-arg APT_MIRROR=deb.debian.org .
+ARG APT_MIRROR=mirrors.aliyun.com
+
 # Runtime system libraries for native Python wheels (slim image has almost none).
 # Grouped by feature — keep in sync when adding deps that call into C libraries.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN sed -i "s|deb.debian.org|${APT_MIRROR}|g; s|security.debian.org|${APT_MIRROR}|g" \
+        /etc/apt/sources.list.d/debian.sources /etc/apt/sources.list 2>/dev/null; \
+    apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     # rapidocr-onnxruntime → opencv-python → headless GUI libs
     libglib2.0-0 \

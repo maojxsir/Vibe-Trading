@@ -30,6 +30,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   for manual runs and cron.
 
 ### Fixed
+- **Docker build: default APT to the Aliyun Debian mirror (`APT_MIRROR` arg).**
+  `deb.debian.org` is heavily rate-limited from CN ECS (~19 KB/s, stalling
+  `apt-get update`); the runtime stage now rewrites the Debian sources to
+  `mirrors.aliyun.com` before installing system libs, mirroring the existing
+  `PIP_INDEX_URL` default. Override with `--build-arg APT_MIRROR=deb.debian.org`.
 - **`tools/ensure_mongo.sh` no longer creates an empty DB on the wrong path.**
   It now prefers the systemd `mongod` unit (honoring `/etc/mongod.conf`), and the
   manual-start fallback defaults to `/var/lib/mongodb` (was the Homebrew path
