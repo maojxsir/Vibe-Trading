@@ -6,6 +6,20 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Screener MongoDB persistence + tracking pool.** Limit-up scan results are now
+  also written to the `stock_data` DB (`screener_results`), and every matched
+  stock enters a tracked pool (`screener_tracking`) from its first hit. A tracked
+  stock is removed when it posts new closing lows for `SCREENER_TRACKING_NEW_LOW_STREAK`
+  consecutive sessions (default 3) or its MAs turn bearish (MA5<MA10<MA20<MA60);
+  tracking stops after `SCREENER_TRACKING_MAX_DAYS` trading days (default 30).
+  Tracking reads prices from the scan's Tushare-backed panel (same source as the
+  scan, batched in one query) so MA60-based removal has enough history; stocks
+  suspended after entry are not mis-expired. Runs automatically after each scan and
+  via the standalone `agent/scripts/run_tracking.py` CLI (cron-friendly). Degrades
+  gracefully when MongoDB is unavailable.
+- **`tools/mongo_tunnel.sh`** — one-click SSH tunnel (start/stop/status/restart)
+  forwarding a local port to the server's MongoDB. Uses an independent connection
+  (`ControlMaster=no`) so it isn't torn down by other multiplexed SSH sessions.
 
 ### Changed
 

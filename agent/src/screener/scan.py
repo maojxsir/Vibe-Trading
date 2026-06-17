@@ -12,6 +12,8 @@ from typing import Any
 
 import pandas as pd
 
+from src.data import mongodb_stock
+from src.screener import tracking_update
 from src.screener.config import SCREENER_POLICY_VERSION, ScreenerConfig
 from src.screener.enrich import enrich_items
 from src.screener.scoring import score_latest
@@ -297,7 +299,38 @@ def run(
 
     out_path = result_path(resolved_trade_date)
     _write_result_atomic(out_path, payload)
+
+    # 结果快照双写 MongoDB + 跟踪池入池 + 触发一次规则判定。
+    # 全部 best-effort：任何失败只告警，不影响扫描主流程与 JSON 落盘。
+    _persist_and_track(payload, items, resolved_trade_date, store=panel_store)
+
     return out_path
+
+
+def _persist_and_track(
+    payload: dict[str, Any],
+    items: list[dict[str, Any]],
+    trade_date: str,
+    *,
+    store: ScreenerStore | None = None,
+) -> None:
+    """扫描结果落 MongoDB 并推进跟踪池（best-effort，失败不抛出）。
+
+    复用扫描已加载的 ``store``，让跟踪判定与扫描同源取价（含足够历史算 MA60），
+    避免逐只回退到仅含近端数据的 loader。
+    """
+    try:
+        if not mongodb_stock.is_mongodb_available():
+            return
+        mongodb_stock.save_screener_result(payload)
+    except Exception as exc:  # noqa: BLE001 - 结果双写是 best-effort
+        logger.warning("screener result mongo write skipped: %s", exc)
+
+    try:
+        tracking_update.enter_pool(items, trade_date)
+        tracking_update.run(trade_date, store=store)
+    except Exception as exc:  # noqa: BLE001 - 跟踪更新是 best-effort
+        logger.warning("screener tracking update skipped: %s", exc)
 
 
 def load_result(trade_date: str) -> dict[str, Any] | None:

@@ -255,6 +255,8 @@ openssl rand -hex 32
 | `MONGO_URI` | MongoDB 连接串，例如 `mongodb://127.0.0.1:27017` |
 | `MONGO_DB` | 数据库名，默认 `stock_data` |
 | `VIBE_MONGODB_ON_DEMAND_SYNC` | 缺数据时自动调用 `tools/stock_data_sync.py` 写入 MongoDB |
+| `SCREENER_TRACKING_MAX_DAYS` | 打板跟踪池最长跟踪交易日数，默认 `30` |
+| `SCREENER_TRACKING_NEW_LOW_STREAK` | 连续收盘创新低剔除阈值，默认 `3` |
 | `CORS_ORIGINS` | 若通过独立域名访问，可设置允许的 origin |
 | `VIBE_TRADING_SSE_TIMEOUT` | 慢模型可适当增大 SSE 超时 |
 
@@ -325,6 +327,67 @@ print('daily_quotes', c['stock_data']['stock_daily_quotes'].estimated_document_c
 应输出约 `12584566`（或与 mongosh 接近的数量）。
 
 `docker-compose.prod.yml` 已包含 `extra_hosts: host.docker.internal:host-gateway` 与 `./tools` 只读挂载（按需补数）。
+
+### 5.3.2 本地开发：通过 SSH 隧道连服务器 MongoDB
+
+本地跑分析 / 调试时，可把服务器的 `stock_data` 库通过 SSH 端口转发映射到本机，无需在本地另装 MongoDB。服务器 mongod 默认仅绑定 `127.0.0.1:27017`，隧道把它转发到本机端口（默认 `27018`）。
+
+**① 配置免密登录（一次性）：**
+
+```bash
+ssh-copy-id -i ~/.ssh/id_ed25519.pub <你在 ~/.ssh/config 中的 Host，如 aliyun>
+```
+
+**② 本机 `agent/.env` 指向隧道端口：**
+
+```bash
+VIBE_USE_MONGODB=1
+MONGO_URI=mongodb://127.0.0.1:27018
+MONGO_DB=stock_data
+```
+
+**③ 一键起隧道（仓库 `tools/` 目录）：**
+
+```bash
+tools/mongo_tunnel.sh start     # 起隧道：本地 27018 → 服务器 127.0.0.1:27017
+tools/mongo_tunnel.sh status    # 查看状态
+tools/mongo_tunnel.sh stop      # 停隧道
+tools/mongo_tunnel.sh restart   # 重启
+```
+
+可用环境变量覆盖默认值：`SSH_HOST`（默认 `aliyun`）、`LOCAL_PORT`（默认 `27018`）、`REMOTE_HOST`/`REMOTE_PORT`（默认 `127.0.0.1:27017`）。
+
+> 注意：若 `~/.ssh/config` 的 `Host *` 开启了连接复用（`ControlMaster auto`），手动起的后台隧道会被其他 ssh 会话结束时拆除。`tools/mongo_tunnel.sh` 已用 `ControlMaster=no` 起独立连接，不受影响。
+
+**④ 验证连通：**
+
+```bash
+cd agent && source .venv/bin/activate
+python -c "from dotenv import load_dotenv; load_dotenv('.env'); from src.data import mongodb_stock; print('available:', mongodb_stock.is_mongodb_available())"
+```
+
+输出 `available: True` 即连通。
+
+### 5.3.3 打板跟踪池（screener tracking）
+
+启用 MongoDB 后，打板扫描结果会额外写入 `stock_data` 库的两个集合（首次运行自动创建，无需手动建表）：
+
+| 集合 | 说明 |
+|------|------|
+| `screener_results` | 每日扫描结果快照（`_id` 为交易日） |
+| `screener_tracking` | 跟踪池：每只入选股票从首次命中起持续跟踪 |
+
+剔除规则（任一命中即剔除，`30` 交易日为最长跟踪上限）：连续 `SCREENER_TRACKING_NEW_LOW_STREAK`（默认 3）日创收盘新低，或均线空头排列 `MA5<MA10<MA20<MA60`。
+
+跟踪更新在每次扫描结束后自动执行；也可用独立 CLI 供 cron 每日收盘后调度：
+
+```bash
+cd agent && source .venv/bin/activate
+python scripts/run_tracking.py            # 默认用面板最新交易日
+python scripts/run_tracking.py --date 2026-06-16
+```
+
+> 跟踪的空头排列规则依赖 ≥60 个交易日历史；若 `stock_daily_quotes` 覆盖不足，先用 `tools/stock_data_sync.py` 回填，或开启 `VIBE_MONGODB_ON_DEMAND_SYNC` 按需补数。
 
 ### 5.4 从本机上传已有配置
 

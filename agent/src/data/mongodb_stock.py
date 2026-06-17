@@ -11,7 +11,7 @@ import os
 import subprocess
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable, Optional
@@ -27,6 +27,10 @@ ON_DEMAND_SYNC_ENV = "VIBE_MONGODB_ON_DEMAND_SYNC"
 DEFAULT_MONGO_URI = "mongodb://localhost:27017"
 DEFAULT_MONGO_DB = "stock_data"
 DATA_SOURCE = "tushare"
+
+# 打板筛选/跟踪集合（与 tools/stock_data_sync.py 共用 stock_data 库）。
+SCREENER_RESULTS_COLL = "screener_results"
+SCREENER_TRACKING_COLL = "screener_tracking"
 
 
 def _truthy(value: str | None) -> bool:
@@ -357,6 +361,139 @@ def trigger_symbol_sync(
         )
         return False
     return True
+
+
+# ---------------------------------------------------------------------------
+# 打板筛选结果 + 跟踪池：stock_data 库内的 CRUD
+#
+# 设计见 docs/superpowers/specs/2026-06-17-screener-mongodb-tracking-design.md。
+# 所有写入都是 best-effort：MongoDB 不可用时返回假值并告警，绝不抛给扫描主流程。
+# ---------------------------------------------------------------------------
+
+
+def _utc_now_iso() -> str:
+    """返回不含微秒的 UTC ISO 时间串，用于 updatedAt/createdAt。"""
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def ensure_screener_indexes() -> None:
+    """为跟踪池建立查询索引（status / day0_date）。失败仅告警。"""
+    if not is_mongodb_available():
+        return
+    try:
+        coll = _get_db()[SCREENER_TRACKING_COLL]
+        coll.create_index("status")
+        coll.create_index("day0_date")
+    except Exception as exc:  # noqa: BLE001 - 索引创建失败不阻断主流程
+        logger.warning("ensure_screener_indexes failed: %s", exc)
+
+
+def save_screener_result(payload: dict[str, Any]) -> bool:
+    """把一次扫描结果快照 upsert 到 ``screener_results``（_id=tradeDate）。
+
+    与本地 JSON 双写，二者互不依赖；MongoDB 失败不影响 JSON 落盘。
+    """
+    trade_date = str(payload.get("tradeDate") or "").strip()
+    if not trade_date:
+        return False
+    if not is_mongodb_available():
+        return False
+    try:
+        doc = dict(payload)
+        doc["_id"] = trade_date
+        doc["updatedAt"] = doc.get("updatedAt") or _utc_now_iso()
+        _get_db()[SCREENER_RESULTS_COLL].replace_one(
+            {"_id": trade_date}, doc, upsert=True
+        )
+        return True
+    except Exception as exc:  # noqa: BLE001 - 结果持久化是 best-effort
+        logger.warning("save_screener_result failed (%s): %s", trade_date, exc)
+        return False
+
+
+def get_screener_result(trade_date: str) -> Optional[dict[str, Any]]:
+    """按交易日读取一次扫描结果快照，不存在或不可用时返回 None。"""
+    iso = str(trade_date or "").strip()
+    if not iso or not is_mongodb_available():
+        return None
+    try:
+        return _get_db()[SCREENER_RESULTS_COLL].find_one({"_id": iso})
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("get_screener_result failed (%s): %s", iso, exc)
+        return None
+
+
+def get_tracking_pool(status: str | None = "tracking") -> list[dict[str, Any]]:
+    """读取跟踪池文档列表。``status=None`` 表示返回全部（含已剔除/到期）。"""
+    if not is_mongodb_available():
+        return []
+    query: dict[str, Any] = {}
+    if status:
+        query["status"] = status
+    try:
+        return list(_get_db()[SCREENER_TRACKING_COLL].find(query))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("get_tracking_pool failed: %s", exc)
+        return []
+
+
+def get_tracking_doc(code: str) -> Optional[dict[str, Any]]:
+    """按代码读取一条跟踪文档。"""
+    cid = bare_symbol(code)
+    if not cid or not is_mongodb_available():
+        return None
+    try:
+        return _get_db()[SCREENER_TRACKING_COLL].find_one({"_id": cid})
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("get_tracking_doc failed (%s): %s", cid, exc)
+        return None
+
+
+def upsert_tracking_doc(doc: dict[str, Any]) -> bool:
+    """整文档 upsert 一条跟踪记录（_id=code）。"""
+    code = bare_symbol(str(doc.get("code") or doc.get("_id") or ""))
+    if not code or not is_mongodb_available():
+        return False
+    try:
+        body = dict(doc)
+        body["_id"] = code
+        body["code"] = code
+        body["updatedAt"] = _utc_now_iso()
+        _get_db()[SCREENER_TRACKING_COLL].replace_one(
+            {"_id": code}, body, upsert=True
+        )
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("upsert_tracking_doc failed (%s): %s", code, exc)
+        return False
+
+
+def bulk_upsert_tracking(docs: Iterable[dict[str, Any]]) -> int:
+    """批量 upsert 跟踪文档，返回成功写入条数。"""
+    items = [d for d in docs if d]
+    if not items or not is_mongodb_available():
+        return 0
+    try:
+        import pymongo
+
+        now = _utc_now_iso()
+        ops = []
+        for doc in items:
+            code = bare_symbol(str(doc.get("code") or doc.get("_id") or ""))
+            if not code:
+                continue
+            body = dict(doc)
+            body["_id"] = code
+            body["code"] = code
+            body["updatedAt"] = now
+            ops.append(pymongo.ReplaceOne({"_id": code}, body, upsert=True))
+        if not ops:
+            return 0
+        result = _get_db()[SCREENER_TRACKING_COLL].bulk_write(ops, ordered=False)
+        return int((result.upserted_count or 0) + (result.modified_count or 0))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("bulk_upsert_tracking failed: %s", exc)
+        return 0
 
 
 def reset_cached_connection() -> None:
