@@ -433,6 +433,12 @@ docker compose -f docker-compose.prod.yml up -d --force-recreate
 
 项目目录以 `~/TradingBuddy` 为例（clone 到其他路径时自行替换）。
 
+**生产默认 slim 镜像**（`docker-compose.prod.yml` 已设 `SLIM=1`）：保留持仓截图 OCR，去掉 Shadow PDF/weasyprint 相关系统库，适合 1–2 GB 内存 ECS。需要完整 PDF 报告时：
+
+```bash
+docker compose -f docker-compose.prod.yml build --build-arg SLIM=0
+```
+
 ### 6.1 前台启动（构建快、内存够时）
 
 ```bash

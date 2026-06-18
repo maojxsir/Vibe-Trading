@@ -8,7 +8,10 @@
 
 services:
   vibe-trading:
-    build: .
+    build:
+      context: .
+      args:
+        SLIM: "1"
     ports:
       - "52889:8899"
     env_file:

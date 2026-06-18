@@ -34,36 +34,35 @@ ENV PIP_INDEX_URL=${PIP_INDEX_URL} \
 #   docker build --build-arg APT_MIRROR=deb.debian.org .
 ARG APT_MIRROR=mirrors.aliyun.com
 
+# SLIM=1 (default for prod ECS): keep holdings OCR (rapidocr/opencv) but drop
+# weasyprint/matplotlib system libs to reduce build time and memory on small VMs.
+# SLIM=0: full Shadow Account PDF + CJK fonts.
+ARG SLIM=1
+
 # Runtime system libraries for native Python wheels (slim image has almost none).
-# Grouped by feature — keep in sync when adding deps that call into C libraries.
 RUN sed -i "s|deb.debian.org|${APT_MIRROR}|g; s|security.debian.org|${APT_MIRROR}|g" \
         /etc/apt/sources.list.d/debian.sources /etc/apt/sources.list 2>/dev/null; \
-    apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    # rapidocr-onnxruntime → opencv-python → headless GUI libs
-    libglib2.0-0 \
-    libgl1 \
-    libxcb1 \
-    libsm6 \
-    libxext6 \
-    libxrender1 \
-    libgomp1 \
-    # weasyprint → shadow-account PDF reports
-    libcairo2 \
-    libpango-1.0-0 \
-    libpangocairo-1.0-0 \
-    libgdk-pixbuf-2.0-0 \
-    shared-mime-info \
-    fontconfig \
-    fonts-noto-cjk \
-    # matplotlib / pillow
-    libfreetype6 \
-    && rm -rf /var/lib/apt/lists/*
+    if [ "$SLIM" = "1" ]; then \
+        apt-get update && apt-get install -y --no-install-recommends \
+            build-essential \
+            libglib2.0-0 libgl1 libxcb1 \
+            && rm -rf /var/lib/apt/lists/*; \
+    else \
+        apt-get update && apt-get install -y --no-install-recommends \
+            build-essential \
+            libglib2.0-0 libgl1 libxcb1 \
+            libsm6 libxext6 libxrender1 libgomp1 \
+            libcairo2 libpango-1.0-0 libpangocairo-1.0-0 \
+            libgdk-pixbuf-2.0-0 shared-mime-info fontconfig fonts-noto-cjk \
+            libfreetype6 \
+            && rm -rf /var/lib/apt/lists/*; \
+    fi
 
 # Python deps (install before copying code for layer caching)
-COPY agent/requirements.txt agent/requirements.txt
-RUN pip install --no-cache-dir --default-timeout=300 --retries 10 \
-    -r agent/requirements.txt
+COPY agent/requirements.txt agent/requirements-slim.txt agent/
+RUN if [ "$SLIM" = "1" ]; then REQ=requirements-slim.txt; else REQ=requirements.txt; fi && \
+    pip install --no-cache-dir --default-timeout=300 --retries 10 \
+    -r agent/$REQ
 
 # Copy project
 COPY pyproject.toml LICENSE README.md ./
@@ -72,8 +71,12 @@ COPY agent/ agent/
 # Copy built frontend
 COPY --from=frontend-build /app/frontend/dist frontend/dist
 
-# Install CLI entrypoint
-RUN pip install --no-cache-dir --default-timeout=300 --retries 10 -e .
+# Install CLI entrypoint (slim: --no-deps to skip weasyprint/matplotlib from pyproject)
+RUN if [ "$SLIM" = "1" ]; then \
+        pip install --no-cache-dir --default-timeout=300 --retries 10 -e . --no-deps; \
+    else \
+        pip install --no-cache-dir --default-timeout=300 --retries 10 -e .; \
+    fi
 
 # Runtime should not run as root. Keep writable app data directories owned by
 # the service user so named Docker volumes inherit usable permissions.
