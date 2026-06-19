@@ -8,6 +8,8 @@
 
 services:
   vibe-trading:
+    # Prebuilt: VT_IMAGE=ghcr.io/maojxsir/vibe-trading:slim-1 docker compose -f docker-compose.prod.yml up -d --no-build
+    image: ${VT_IMAGE:-tradingbuddy-vibe-trading:latest}
     build:
       context: .
       args:
