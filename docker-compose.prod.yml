@@ -11,7 +11,7 @@ services:
     build:
       context: .
       args:
-        SLIM: "1"
+        SLIM: "2"
     ports:
       - "52889:8899"
     env_file:

@@ -28,10 +28,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   Documented in `DEPLOY_SERVER_zh.md` that screener scans must run inside the
   container (the web reads on-disk JSON, not MongoDB), with `docker exec` examples
   for manual runs and cron.
-- **Slim prod Docker image (`SLIM=1`, default in `docker-compose.prod.yml`).**
-  Keeps holdings screenshot OCR (`rapidocr-onnxruntime`) but omits weasyprint,
-  matplotlib, and their heavy apt libs (cairo/pango/CJK fonts). Shadow Account
-  reports degrade to HTML-only. Use `--build-arg SLIM=0` for full PDF output.
+- **Slim prod Docker image (`SLIM` build arg, default `SLIM=2` in prod compose).**
+  Three tiers: `SLIM=0` full PDF+OCR; `SLIM=1` OCR without PDF (needs ~4 GB RAM
+  to build); `SLIM=2` ecs minimal for 1–2 GB VMs (screener/Web/Agent, no local
+  OCR/doc readers/ccxt/scipy/sklearn). Multi-stage Dockerfile drops
+  `build-essential` from the runtime layer.
 
 ### Fixed
 - **Docker build: default APT to the Aliyun Debian mirror (`APT_MIRROR` arg).**

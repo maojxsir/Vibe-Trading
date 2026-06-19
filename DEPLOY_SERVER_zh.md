@@ -433,9 +433,16 @@ docker compose -f docker-compose.prod.yml up -d --force-recreate
 
 项目目录以 `~/TradingBuddy` 为例（clone 到其他路径时自行替换）。
 
-**生产默认 slim 镜像**（`docker-compose.prod.yml` 已设 `SLIM=1`）：保留持仓截图 OCR，去掉 Shadow PDF/weasyprint 相关系统库，适合 1–2 GB 内存 ECS。需要完整 PDF 报告时：
+**生产默认 ecs 镜像**（`docker-compose.prod.yml` 已设 `SLIM=2`）：面向 1–2 GB 内存 ECS，含打板扫描/Web/Agent，**不含**本地 OCR 与 PDF。持仓请用手动录入；需要截图 OCR 用 `SLIM=1`（建议 ≥4 GB 内存机器构建）；完整 PDF 用 `SLIM=0`：
 
 ```bash
+# 默认（ecs，最省内存）
+docker compose -f docker-compose.prod.yml up --build -d
+
+# 含持仓截图 OCR（构建更重）
+docker compose -f docker-compose.prod.yml build --build-arg SLIM=1
+
+# 完整 PDF + OCR
 docker compose -f docker-compose.prod.yml build --build-arg SLIM=0
 ```
 

@@ -1,0 +1,36 @@
+# Minimal ECS image (SLIM=2): screener + Web API + Agent + MongoDB/Tushare.
+# Omits local OCR, doc readers, ML/signal skill libs, crypto/ccxt, scipy stack.
+# Holdings screenshot import returns ocr_failed; manual entry still works.
+
+# Core LLM & Orchestration
+rich>=13.0.0
+pyyaml>=6.0.0
+langchain>=1.0.0,<2
+langchain-core>=1.0.0,<2
+langchain-openai>=1.0.0,<2
+langgraph>=1.0.10,<1.1
+langgraph-checkpoint>=2.1.0,<5
+python-dotenv>=1.0.0
+httpx>=0.28.0
+oauth-cli-kit>=0.1.3
+
+# Data & Computation (duckdb: screener panel parquet)
+pandas>=2.0.0
+numpy>=1.24.0
+duckdb>=1.2.0
+
+# Data Providers (A-share primary + fallback)
+pymongo>=4.6.0
+tushare>=1.2.89
+requests>=2.31.0
+akshare>=1.12.0
+
+# REST API & SSE
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.0.0
+python-multipart>=0.0.18
+sse-starlette>=1.6.0
+
+# Shadow Account HTML-only report
+jinja2>=3.1.0
