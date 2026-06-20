@@ -79,12 +79,32 @@ def _slice_panel_to_trade_date(panel: pd.DataFrame, trade_date: str) -> pd.DataF
     return work.loc[work.index <= end].sort_index()
 
 
+def _json_default(obj: Any) -> Any:
+    """Convert non-standard types (e.g. numpy integers/floats) to JSON-safe values."""
+    try:
+        import numpy as np
+
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if isinstance(obj, np.bool_):
+            return bool(obj)
+    except ImportError:
+        pass
+    raise TypeError(
+        f"Object of type {type(obj).__name__} is not JSON serializable"
+    )
+
+
 def _write_result_atomic(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     unique = f"{os.getpid()}.{uuid.uuid4().hex}"
     tmp_path = path.with_name(f"{path.name}.{unique}.tmp")
     tmp_path.write_text(
-        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=_json_default),
         encoding="utf-8",
     )
     os.replace(tmp_path, path)
